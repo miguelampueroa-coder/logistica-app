@@ -72,6 +72,8 @@ memoria, graceful shutdown, health check real, CI GitHub Actions.
   `delivery_evidence`, `package_photos`, `fcm_tokens`
 - `004_fix_schema_gaps.sql` — corrige 3 desajustes hallados al auditar los
   56 insert/update del backend contra 001-003 (ver abajo)
+- `005_rls_whatsapp.sql` — habilita RLS en las 10 tablas de 002, que no lo
+  tenían
 
 ### Auditoría de esquema (2026-07-28, antes de conectar la DB real)
 
@@ -93,6 +95,20 @@ las columnas declaradas en las migraciones. Tres hallazgos, corregidos en 004:
    el backend inserta con service role, que salta RLS.
 
 Ninguno era visible antes porque los 89 tests corren con mocks.
+
+### 🔴 RLS ausente en todo el módulo WhatsApp (corregido en 005)
+
+Conteo por migración: 001 → RLS en 6 tablas, 16 policies. 003 → 4 tablas,
+7 policies. **002 → 0 y 0.** Sus 10 tablas quedaron sin `ENABLE ROW LEVEL
+SECURITY`, violando la regla del proyecto. Con la anon key —pública por
+diseño— quedaban legibles y escribibles el contenido completo de las
+conversaciones (`messages`), las direcciones y teléfonos guardados
+(`company_memory`), los pedidos por chat (`dispatch_orders`) y los ingresos
+diarios (`crm_daily_metrics`), de todas las empresas a la vez.
+
+005 habilita RLS en las 10 sin agregar policies: el módulo accede solo con
+service role, que salta RLS. Al exponer estas tablas al navegador habrá que
+escribir policies filtrando por `company_id` vía `company_members`.
 
 ⚠️ **Las migraciones no son idempotentes**: los `CREATE INDEX`, `CREATE POLICY`
 y `CREATE TRIGGER` de 001 y 003 no llevan `IF NOT EXISTS`. Si una aplicación
