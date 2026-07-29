@@ -148,10 +148,14 @@ export async function createShipment(req: Request, res: Response): Promise<void>
           { userId }
         );
 
-        await supabase
+        const { error: paymentLinkError } = await supabase
           .from('shipments')
           .update({ payment_id: paymentIntent.id })
           .eq('id', shipmentData.id);
+
+        if (paymentLinkError) {
+          console.error('[Order] Failed to link payment to shipment:', paymentLinkError.message);
+        }
       } catch (err) {
         console.error('[Order] Payment creation failed:', err);
       }

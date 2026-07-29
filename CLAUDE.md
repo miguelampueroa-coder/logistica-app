@@ -70,6 +70,33 @@ memoria, graceful shutdown, health check real, CI GitHub Actions.
   `crm_daily_metrics`
 - `003_maps_tracking_uploads.sql` (139) — `location_history`,
   `delivery_evidence`, `package_photos`, `fcm_tokens`
+- `004_fix_schema_gaps.sql` — corrige 3 desajustes hallados al auditar los
+  56 insert/update del backend contra 001-003 (ver abajo)
+
+### Auditoría de esquema (2026-07-28, antes de conectar la DB real)
+
+Se compararon por script las 56 operaciones insert/update del backend contra
+las columnas declaradas en las migraciones. Tres hallazgos, corregidos en 004:
+
+1. **`shipments.payment_id` no existía.** `order.controller.ts` lo escribe al
+   crear el pago y lo lee al entregar para capturar el cobro. El update fallaba
+   en silencio (supabase-js devuelve `error`, no lanza, y ahí no se revisaba),
+   así que **la captura del pago al entregar nunca se habría disparado**.
+   Además del ALTER, ahora el update revisa y loguea su error.
+2. **`users.is_active` no existía.** `admin.routes.ts` lo pide en dos
+   `select`; `users` solo tenía `is_available`, que es otra cosa
+   (disponibilidad del prestador ≠ cuenta habilitada). `GET /api/admin/users`
+   habría devuelto error.
+3. **Insert abierto en `payments`.** La policy `WITH CHECK (true)` de 001
+   dejaba a cualquier rol —incluido `anon`, cuya key es pública por diseño—
+   insertar pagos con monto libre y `status: 'completed'`. Policy eliminada;
+   el backend inserta con service role, que salta RLS.
+
+Ninguno era visible antes porque los 89 tests corren con mocks.
+
+⚠️ **Las migraciones no son idempotentes**: los `CREATE INDEX`, `CREATE POLICY`
+y `CREATE TRIGGER` de 001 y 003 no llevan `IF NOT EXISTS`. Si una aplicación
+falla a medio camino, reintentarla aborta. Aplicarlas en orden y de una sola vez.
 
 ## Modelo de precios (fuente: `apps/backend/src/services/pricing.service.ts`)
 
