@@ -84,6 +84,18 @@ export const api = {
         method: 'POST',
         token,
       }),
+
+    cancel: (id: string, reason: string, token: string) =>
+      fetchAPI<{ message: string }>(`/api/orders/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+        token,
+      }),
+  },
+
+  tracking: {
+    get: (shipmentId: string, token: string) =>
+      fetchAPI<{ tracking: any }>(`/api/tracking/${shipmentId}`, { token }),
   },
 
   user: {

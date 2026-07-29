@@ -66,6 +66,18 @@ router.post('/:shipmentId/location', authenticate, async (req: Request, res: Res
   }
 });
 
+// GET /api/tracking/active — Get all active trackings (admin/provider)
+// Debe ir antes de /:shipmentId, que si no captura "active" como id.
+router.get('/active', authenticate, async (req: Request, res: Response) => {
+  try {
+    const trackings = await trackingService.getActiveTrackings();
+    res.json({ trackings, count: trackings.length });
+  } catch (error) {
+    console.error('[Tracking] Get active error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/tracking/:shipmentId — Get tracking state for a shipment
 router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => {
   try {
@@ -80,17 +92,6 @@ router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => 
     res.json({ tracking: state });
   } catch (error) {
     console.error('[Tracking] Get state error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// GET /api/tracking/active — Get all active trackings (admin/provider)
-router.get('/active', authenticate, async (req: Request, res: Response) => {
-  try {
-    const trackings = await trackingService.getActiveTrackings();
-    res.json({ trackings, count: trackings.length });
-  } catch (error) {
-    console.error('[Tracking] Get active error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

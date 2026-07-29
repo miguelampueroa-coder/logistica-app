@@ -1,12 +1,19 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { api } from '@/lib/api';
-import { User } from '@supabase/supabase-js';
+
+const TOKEN_KEY = 'enviazo_token';
+
+interface AuthUser {
+  id: string;
+  email: string;
+  name?: string;
+  role?: string;
+}
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   profile: any | null;
   token: string | null;
   isLoading: boolean;
@@ -18,62 +25,52 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<any | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
-    const checkSession = async () => {
+    const restoreSession = async () => {
+      const stored = localStorage.getItem(TOKEN_KEY);
+
+      if (!stored) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          setUser(session.user);
-          setToken(session.access_token);
-          
-          const profileData = await api.user.getProfile(session.access_token);
-          setProfile(profileData.profile);
-        }
-      } catch (error) {
-        console.error('Session check error:', error);
+        const { profile: profileData } = await api.user.getProfile(stored);
+        setToken(stored);
+        setProfile(profileData);
+        setUser({
+          id: profileData.id,
+          email: profileData.email,
+          name: profileData.name,
+          role: profileData.role,
+        });
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
       } finally {
         setIsLoading(false);
       }
     };
 
-    checkSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' && session) {
-          setUser(session.user);
-          setToken(session.access_token);
-          
-          const profileData = await api.user.getProfile(session.access_token);
-          setProfile(profileData.profile);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setProfile(null);
-          setToken(null);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
+    restoreSession();
   }, []);
+
+  const applySession = async (authToken: string, userData: AuthUser) => {
+    localStorage.setItem(TOKEN_KEY, authToken);
+    setToken(authToken);
+    setUser(userData);
+
+    const { profile: profileData } = await api.user.getProfile(authToken);
+    setProfile(profileData);
+  };
 
   const signIn = async (email: string, password: string) => {
     const { token: authToken, user: userData } = await api.auth.login({ email, password });
-    setToken(authToken);
-    
-    const { data: { session } } = await supabase.auth.signInWithPassword({ email, password });
-    if (session) {
-      setUser(session.user);
-    }
-    
-    const profileData = await api.user.getProfile(authToken);
-    setProfile(profileData.profile);
+    await applySession(authToken, userData);
   };
 
   const signUp = async (email: string, password: string, name: string, phone?: string) => {
@@ -84,19 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone,
       role: 'client',
     });
-    setToken(authToken);
-    
-    const { data: { session } } = await supabase.auth.signInWithPassword({ email, password });
-    if (session) {
-      setUser(session.user);
-    }
-    
-    const profileData = await api.user.getProfile(authToken);
-    setProfile(profileData.profile);
+    await applySession(authToken, userData);
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem(TOKEN_KEY);
     setUser(null);
     setProfile(null);
     setToken(null);
@@ -104,15 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        token,
-        isLoading,
-        signIn,
-        signUp,
-        signOut,
-      }}
+      value={{ user, profile, token, isLoading, signIn, signUp, signOut }}
     >
       {children}
     </AuthContext.Provider>

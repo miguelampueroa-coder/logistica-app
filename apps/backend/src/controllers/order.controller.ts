@@ -520,8 +520,8 @@ export async function getShipmentById(req: Request, res: Response): Promise<void
       .select(`
         *,
         packages (description, weight_kg, length_cm, width_cm, height_cm, notes),
-        users!shipments_user_id_fkey (name, phone),
-        users!shipments_provider_id_fkey (name, phone)
+        client:users!shipments_user_id_fkey (name, phone),
+        provider:users!shipments_provider_id_fkey (name, phone)
       `)
       .eq('id', id)
       .single();

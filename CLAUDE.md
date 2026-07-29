@@ -138,6 +138,46 @@ el servidor.
    solo para él. Además de romper el login, era un problema de aislamiento
    entre usuarios. Ahora usa `createAuthClient()`, un cliente efímero.
 
+### 🔴 Cinco fallas más, encontradas al usar el frontend (2026-07-29)
+
+1. **`GET /api/orders/:id` devolvía 404 siempre.** El select pedía dos veces
+   la relación `users` (cliente y repartidor) sin alias, y PostgREST lo
+   rechaza con `42712 table name "shipments_users_1" specified more than once`.
+   Ver el detalle de un envío nunca funcionó. Mismo patrón en
+   `admin.routes.ts:241`. Corregido con alias `client:` y `provider:`.
+2. **El tracking estaba roto de raíz.** `tracking.service.ts` pedía
+   `vehicles.license_plate`; la columna se llama `plate`. El select fallaba,
+   `getTrackingState` devolvía null y el endpoint respondía 404 siempre.
+   Mismo error en `admin.routes.ts:139`.
+3. **`/api/tracking/active` era inalcanzable.** Estaba declarado después de
+   `/:shipmentId`, que capturaba "active" como si fuera un id.
+4. **Las notificaciones de WhatsApp no se enviaban.** Tres selects pedían
+   `shipments.customer_phone`, columna que no existe: el teléfono del cliente
+   vive en `dispatch_orders`. Fallaban en silencio (data null → el `if` no
+   entraba → ningún mensaje). Resuelto con un helper `getCustomerPhone`.
+5. **El login del frontend estaba roto.** `useAuth` hacía un segundo login
+   contra Supabase con credenciales placeholder, y `onAuthStateChange`
+   sobrescribía el JWT del backend con el access token de Supabase — que el
+   backend rechaza, porque valida con su propio `JWT_SECRET`. Reescrito: el
+   backend es la única fuente de verdad y el token se persiste en
+   localStorage.
+
+El verificador de esquema vive en el scratchpad de la sesión; la idea vale
+más que el archivo: comparar los `.select()` / `.insert()` del código contra
+las columnas de las migraciones encuentra en segundos lo que los tests con
+mocks no ven.
+
+### Nuevo en el frontend
+
+`app/dashboard/shipments/[id]/page.tsx` — detalle del envío: línea de tiempo
+de estados, mapa (OpenStreetMap embebido, sin API key), datos del repartidor,
+desglose de precio y cancelación. Refresca cada 15 s mientras el estado es
+`in_transit`. El WebSocket `/ws/tracking` existe en el backend y queda como
+mejora sobre este refresco por consulta.
+
+⚠️ El frontend todavía se llama **LogiApp** en la interfaz; el proyecto se
+renombró a Enviazo. Falta decidir y aplicar el cambio.
+
 ### Verificado end-to-end contra Postgres real
 
 Registro → login → envío Puerto Montt–Puerto Varas, con los datos escritos

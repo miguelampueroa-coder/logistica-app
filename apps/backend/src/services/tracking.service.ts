@@ -100,7 +100,7 @@ export class TrackingService {
         estimated_minutes,
         provider_id,
         users!shipments_provider_id_fkey (id, name, phone),
-        vehicles!shipments_vehicle_id_fkey (type, license_plate)
+        vehicles!shipments_vehicle_id_fkey (type, plate)
       `)
       .eq('id', shipmentId)
       .single();
@@ -137,7 +137,7 @@ export class TrackingService {
         name: String(usersData.name || ''),
         phone: String(usersData.phone || ''),
         vehicleType: String(vehiclesData?.type || ''),
-        vehiclePlate: String(vehiclesData?.license_plate || ''),
+        vehiclePlate: String(vehiclesData?.plate || ''),
       } : null,
       currentLocation: shipment.current_lat ? {
         lat: shipment.current_lat,

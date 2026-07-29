@@ -136,7 +136,7 @@ router.get('/users/:id', async (req: Request, res: Response) => {
     // Get user's vehicles (if provider)
     const { data: vehicles } = await supabase
       .from('vehicles')
-      .select('id, type, brand, model, license_plate, is_active')
+      .select('id, type, brand, model, plate, is_active')
       .eq('user_id', id);
 
     // Get user's ratings
@@ -241,8 +241,8 @@ router.get('/shipments', async (req: Request, res: Response) => {
       .select(`
         id, status, total_price, distance_km, urgency, created_at, updated_at,
         origin_address, dest_address,
-        users!shipments_user_id_fkey (name, phone),
-        users!shipments_provider_id_fkey (name, phone)
+        client:users!shipments_user_id_fkey (name, phone),
+        provider:users!shipments_provider_id_fkey (name, phone)
       `)
       .order('created_at', { ascending: false })
       .range(Number(offset), Number(offset) + Number(limit) - 1);

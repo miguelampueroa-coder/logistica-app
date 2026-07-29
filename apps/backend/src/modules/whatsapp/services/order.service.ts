@@ -17,6 +17,18 @@ export class OrderService {
     this.notificationEngine = engine;
   }
 
+  // El telefono del cliente vive en dispatch_orders, no en shipments.
+  private async getCustomerPhone(shipmentId: string): Promise<string | null> {
+    const supabase = getSupabaseAdmin();
+    const { data } = await supabase
+      .from('dispatch_orders')
+      .select('customer_phone')
+      .eq('shipment_id', shipmentId)
+      .maybeSingle();
+
+    return data?.customer_phone ?? null;
+  }
+
   /**
    * Notify customer when a provider accepts the shipment.
    */
@@ -28,11 +40,7 @@ export class OrderService {
     if (!this.notificationEngine) return;
 
     const supabase = getSupabaseAdmin();
-    const { data: shipment } = await supabase
-      .from('shipments')
-      .select('origin_address, dest_address, customer_phone')
-      .eq('id', shipmentId)
-      .single();
+    const customerPhone = await this.getCustomerPhone(shipmentId);
 
     const { data: provider } = await supabase
       .from('users')
@@ -40,9 +48,9 @@ export class OrderService {
       .eq('id', providerId)
       .single();
 
-    if (shipment && provider) {
+    if (provider) {
       await this.notificationEngine.notifyCustomerDriverAssigned(
-        shipment.customer_phone || companyPhone,
+        customerPhone || companyPhone,
         provider.name || 'Repartidor',
         provider.phone || 'Sin teléfono'
       );
@@ -55,16 +63,11 @@ export class OrderService {
   async notifyPickedUp(shipmentId: string): Promise<void> {
     if (!this.notificationEngine) return;
 
-    const supabase = getSupabaseAdmin();
-    const { data: shipment } = await supabase
-      .from('shipments')
-      .select('customer_phone')
-      .eq('id', shipmentId)
-      .single();
+    const customerPhone = await this.getCustomerPhone(shipmentId);
 
-    if (shipment?.customer_phone) {
+    if (customerPhone) {
       await this.notificationEngine.sendDirectMessage(
-        shipment.customer_phone,
+        customerPhone,
         `📦 Tu envío #${shipmentId.slice(0, 8)} ha sido recogido y está en camino.`
       );
     }
@@ -76,16 +79,11 @@ export class OrderService {
   async notifyDelivered(shipmentId: string): Promise<void> {
     if (!this.notificationEngine) return;
 
-    const supabase = getSupabaseAdmin();
-    const { data: shipment } = await supabase
-      .from('shipments')
-      .select('customer_phone')
-      .eq('id', shipmentId)
-      .single();
+    const customerPhone = await this.getCustomerPhone(shipmentId);
 
-    if (shipment?.customer_phone) {
+    if (customerPhone) {
       await this.notificationEngine.notifyDelivered(
-        shipment.customer_phone,
+        customerPhone,
         shipmentId.slice(0, 8)
       );
     }
