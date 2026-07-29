@@ -1,0 +1,26 @@
+{
+  "name": "enviazo-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enviazo - Plataforma de envíos tipo Uber desde Puerto Montt",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/backend",
+    "build": "npm run build --workspace=apps/backend",
+    "start": "npm run start --workspace=apps/backend",
+    "lint": "npm run lint --workspace=apps/backend",
+    "typecheck": "npm run typecheck --workspace=apps/backend"
+  },
+  "keywords": [
+    "logistics",
+    "delivery",
+    "uber",
+    "shipping",
+    "express",
+    "supabase"
+  ],
+  "author": "",
+  "license": "MIT"
+}
