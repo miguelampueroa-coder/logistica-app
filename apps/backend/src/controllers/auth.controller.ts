@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { getSupabaseAdmin } from '../config/database.js';
+import { createAuthClient, getSupabaseAdmin } from '../config/database.js';
 import { generateToken } from '../middleware/auth.js';
 import { User, UserRole } from '../types/index.js';
 
@@ -74,8 +74,10 @@ export async function login(req: Request, res: Response): Promise<void> {
     const { email, password } = req.body;
     const supabase = getSupabaseAdmin();
 
-    // Login con Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    // Cliente efimero: signInWithPassword deja la sesion del usuario
+    // adherida al cliente que la ejecuta, y el admin es un singleton
+    // compartido por todo el proceso.
+    const { data: authData, error: authError } = await createAuthClient().auth.signInWithPassword({
       email,
       password,
     });

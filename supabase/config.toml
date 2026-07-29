@@ -386,7 +386,9 @@ deno_version = 2
 # secret_key = "env(SECRET_VALUE)"
 
 [analytics]
-enabled = true
+# Desactivado: el contenedor vector monta el docker.sock del host y Colima
+# no lo soporta, lo que impide levantar el stack local completo.
+enabled = false
 port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"

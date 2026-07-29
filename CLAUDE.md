@@ -74,6 +74,8 @@ memoria, graceful shutdown, health check real, CI GitHub Actions.
   56 insert/update del backend contra 001-003 (ver abajo)
 - `005_rls_whatsapp.sql` — habilita RLS en las 10 tablas de 002, que no lo
   tenían
+- `006_grants.sql` — otorga privilegios a `service_role`; sin esto PostgREST
+  respondía 42501 a todo
 
 ### Auditoría de esquema (2026-07-28, antes de conectar la DB real)
 
@@ -109,6 +111,43 @@ diarios (`crm_daily_metrics`), de todas las empresas a la vez.
 005 habilita RLS en las 10 sin agregar policies: el módulo accede solo con
 service role, que salta RLS. Al exponer estas tablas al navegador habrá que
 escribir policies filtrando por `company_id` vía `company_members`.
+
+### 🔴 Cuatro fallas que impedían que el proyecto funcionara (2026-07-28)
+
+Aparecieron al levantar el backend contra Postgres real por primera vez.
+Ninguna la detectaban los 89 tests, porque corren con mocks y nunca arrancan
+el servidor.
+
+1. **Sin GRANTs → nada funcionaba.** Ninguna migración otorgaba privilegios.
+   Las 20 tablas tenían `has_table_privilege = false` para `service_role`,
+   así que PostgREST respondía `42501 permission denied` a **toda** operación,
+   health check incluido. Con las migraciones tal como estaban, la plataforma
+   completa era inoperable contra una base real. Corregido en 006.
+2. **`pino-pretty` faltaba.** `logger.ts:16` lo usa como transport cuando
+   `NODE_ENV=development` y no estaba declarado ni instalado: el servidor
+   crasheaba al arrancar. Agregado a devDependencies.
+3. **`ws` v6 con `@types/ws` v8.** El código importa `WebSocketServer`, export
+   que solo existe desde v8; en runtime había 6.2.6. `tsc` pasaba limpio por
+   los tipos y el servidor moría con `WebSocketServer is not a constructor`.
+   Subido a ^8.21.1.
+4. **El login envenenaba el cliente admin.** `login()` ejecutaba
+   `signInWithPassword` sobre el singleton de `getSupabaseAdmin()`.
+   supabase-js deja la sesión adherida al cliente que la ejecuta, así que
+   tras un login **todo el proceso** pasaba a consultar como `authenticated`
+   con el token del último usuario que entró — para todos los usuarios, no
+   solo para él. Además de romper el login, era un problema de aislamiento
+   entre usuarios. Ahora usa `createAuthClient()`, un cliente efímero.
+
+### Verificado end-to-end contra Postgres real
+
+Registro → login → envío Puerto Montt–Puerto Varas, con los datos escritos
+en la base. El precio calculado cuadra con `pricing.service.ts`:
+17,04 km × 700 = 11.928 base, +200 (2 kg sobre el umbral de 10),
++0 volumen (0,03 m³), +300 urgencia = 12.428, × 1,5 furgoneta = **18.642 CLP**.
+
+Entorno local: Colima (Docker sin privilegios de admin) + `supabase start`
+con `[analytics] enabled = false` en `config.toml` — el contenedor `vector`
+monta el docker.sock del host y Colima no lo soporta.
 
 ⚠️ **Las migraciones no son idempotentes**: los `CREATE INDEX`, `CREATE POLICY`
 y `CREATE TRIGGER` de 001 y 003 no llevan `IF NOT EXISTS`. Si una aplicación

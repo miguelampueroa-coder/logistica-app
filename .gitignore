@@ -43,3 +43,6 @@ coverage/
 # Supabase
 supabase/.temp/
 supabase/.env
+
+# Uploads locales
+uploads/
