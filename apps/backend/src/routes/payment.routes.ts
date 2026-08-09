@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
+import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { PaymentService, PaymentProviderType } from '../services/payment.service.js';
 import { getSupabaseAdmin } from '../config/database.js';
+import { logger } from '../services/logger.js';
 
 const router = Router();
 const paymentService = new PaymentService();
@@ -158,9 +160,15 @@ router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => 
 });
 
 // POST /api/payments/webhook/stripe — Stripe webhook handler
-router.post('/webhook/stripe', async (req: Request, res: Response) => {
+// Use raw body middleware for Stripe signature validation
+router.post('/webhook/stripe', express.raw({type: 'application/json'}), async (req: Request, res: Response) => {
   try {
     const signature = req.headers['stripe-signature'] as string;
+    if (!signature) {
+      logger.warn('Stripe webhook missing signature header');
+      res.status(400).json({ error: 'Missing stripe-signature header' });
+      return;
+    }
 
     const result = await paymentService.handleWebhook('stripe', req.body, signature);
 
@@ -197,7 +205,15 @@ router.post('/webhook/stripe', async (req: Request, res: Response) => {
 // POST /api/payments/webhook/webpay — Webpay webhook handler
 router.post('/webhook/webpay', async (req: Request, res: Response) => {
   try {
-    const result = await paymentService.handleWebhook('webpay', req.body, '');
+    // Extract signature from Transbank header or token_ws query param
+    const signature = (req.headers['x-transbank-signature'] || req.query.token_ws) as string;
+    if (!signature) {
+      logger.warn('Webpay webhook missing signature');
+      res.status(400).json({ error: 'Missing signature' });
+      return;
+    }
+
+    const result = await paymentService.handleWebhook('webpay', req.body, signature);
 
     if (result?.event === 'payment.succeeded') {
       const token = result.data.token as string;
