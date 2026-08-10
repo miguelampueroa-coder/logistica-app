@@ -27,7 +27,29 @@ export function getSupabaseAdmin(): SupabaseClient {
         autoRefreshToken: false,
         persistSession: false,
       },
+      db: {
+        schema: 'public',
+      },
     });
   }
   return supabaseAdmin;
+}
+
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxAttempts = 3,
+  delayMs = 100
+): Promise<T> {
+  let lastError: Error = new Error('Unknown error');
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (i < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, delayMs * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastError;
 }

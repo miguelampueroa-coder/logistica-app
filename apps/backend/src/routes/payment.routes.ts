@@ -44,7 +44,11 @@ router.post('/create', authenticate, async (req: Request, res: Response) => {
     }
 
     // Verify user owns this shipment
-    if (shipment.user_id !== req.user!.userId && req.user!.role !== 'admin') {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    if (shipment.user_id !== req.user.userId && req.user.role !== 'admin') {
       res.status(403).json({ error: 'Not authorized' });
       return;
     }
@@ -61,7 +65,7 @@ router.post('/create', authenticate, async (req: Request, res: Response) => {
       shipment.total_price,
       method,
       {
-        userId: req.user!.userId,
+        userId: req.user.userId,
         returnUrl: returnUrl || 'http://localhost:3000/payment/return',
       }
     );
@@ -119,7 +123,11 @@ router.post('/refund', authenticate, async (req: Request, res: Response) => {
     }
 
     // Only admin can refund
-    if (req.user!.role !== 'admin') {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    if (req.user.role !== 'admin') {
       res.status(403).json({ error: 'Only admins can process refunds' });
       return;
     }
