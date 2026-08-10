@@ -114,7 +114,13 @@ export class TrackingWebSocket {
 
   private unsubscribeFromShipment(sub: TrackingSubscription, shipmentId: string): void {
     sub.shipmentIds.delete(shipmentId);
-    this.shipmentClients.get(shipmentId)?.delete(sub.ws);
+    const clients = this.shipmentClients.get(shipmentId);
+    if (clients) {
+      clients.delete(sub.ws);
+      if (clients.size === 0) {
+        this.shipmentClients.delete(shipmentId);
+      }
+    }
 
     sub.ws.send(JSON.stringify({
       type: 'unsubscribed',
@@ -124,7 +130,13 @@ export class TrackingWebSocket {
 
   private cleanupSubscription(sub: TrackingSubscription): void {
     sub.shipmentIds.forEach(id => {
-      this.shipmentClients.get(id)?.delete(sub.ws);
+      const clients = this.shipmentClients.get(id);
+      if (clients) {
+        clients.delete(sub.ws);
+        if (clients.size === 0) {
+          this.shipmentClients.delete(id);
+        }
+      }
     });
     this.subscriptions.delete(sub.ws);
   }
