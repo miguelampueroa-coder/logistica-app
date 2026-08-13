@@ -5,7 +5,9 @@ import { createEmailProvider } from './email.service.js';
 import { logger } from './logger.js';
 
 let notificationService: UnifiedNotificationService | null = null;
-const listeners: Array<{ event: string; handler: any }> = [];
+type ShipmentEventHandler = (event: ShipmentEvent) => Promise<void>;
+
+const listeners: Array<{ event: string; handler: ShipmentEventHandler }> = [];
 
 export function setupNotificationSubscribers(): void {
   if (notificationService) {

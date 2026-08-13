@@ -25,16 +25,31 @@ export class WebhookGateway {
 
   verifyRequestSignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
     if (!this.verifySignature) return true;
+
+    // Sin secreto no se puede verificar nada. En produccion eso significa
+    // rechazar: dejar pasar webhooks sin firma permite que cualquiera inyecte
+    // mensajes falsos y genere pedidos. En desarrollo se deja pasar para poder
+    // probar sin credenciales, pero avisando.
     if (!this.appSecret) {
-      log.warn('WHATSAPP_WEBHOOK_SECRET not configured, skipping signature verification');
+      if (process.env.NODE_ENV === 'production') {
+        log.error('WHATSAPP_WEBHOOK_SECRET not configured: rejecting webhook in production');
+        return false;
+      }
+      log.warn('WHATSAPP_WEBHOOK_SECRET not configured, skipping signature verification (dev only)');
       return true;
     }
+
     if (!signatureHeader) return false;
 
     const expectedPrefix = 'sha256=';
     if (!signatureHeader.startsWith(expectedPrefix)) return false;
 
     const expectedSignature = signatureHeader.slice(expectedPrefix.length);
+
+    // Solo hex: sin esto, una firma del largo correcto pero con caracteres no
+    // hex produce un Buffer mas corto y timingSafeEqual tira una excepcion.
+    if (!/^[0-9a-f]+$/i.test(expectedSignature)) return false;
+
     const hmac = createHmac('sha256', this.appSecret).update(rawBody).digest('hex');
 
     if (hmac.length !== expectedSignature.length) return false;
@@ -47,7 +62,11 @@ export class WebhookGateway {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    // Sin el token configurado, token y WHATSAPP_VERIFY_TOKEN son ambos
+    // undefined y la comparacion daba true, dejando pasar la verificacion.
+    const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+
+    if (mode === 'subscribe' && expectedToken && token === expectedToken) {
       log.info('Webhook verification successful');
       res.status(200).send(challenge);
     } else {
