@@ -9,6 +9,8 @@ export const registerSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
   name: z.string().min(2, 'Name must be at least 2 characters'),
   phone: z.string().optional(),
+  // 'admin' se asigna manualmente en la DB, nunca por autoregistro.
+  role: z.enum(['client', 'provider']).default('client'),
 });
 
 export const loginSchema = z.object({
@@ -18,7 +20,9 @@ export const loginSchema = z.object({
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, name, phone } = req.body;
+    const { email, password, name, phone, role } = req.body as {
+      email: string; password: string; name: string; phone?: string; role: UserRole;
+    };
     const supabase = getSupabaseAdmin();
 
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
@@ -37,7 +41,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       email,
       name,
       phone,
-      role: 'client',
+      role,
     });
 
     if (profileError) {
@@ -49,7 +53,7 @@ export async function register(req: Request, res: Response): Promise<void> {
     const token = generateToken({
       userId: authData.user.id,
       email,
-      role: 'client',
+      role,
     });
 
     res.status(201).json({
@@ -60,7 +64,7 @@ export async function register(req: Request, res: Response): Promise<void> {
         email,
         name,
         phone,
-        role: 'client',
+        role,
       },
     });
   } catch (error) {
@@ -119,6 +123,38 @@ export async function login(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+export async function refresh(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const supabase = getSupabaseAdmin();
+    const { data: profile } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', req.user.userId)
+      .single();
+
+    if (!profile) {
+      res.status(404).json({ error: 'User profile not found' });
+      return;
+    }
+
+    const newToken = generateToken({
+      userId: req.user.userId,
+      email: req.user.email,
+      role: profile.role,
+    });
+
+    res.json({ token: newToken });
+  } catch (error) {
+    console.error('Token refresh error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 }

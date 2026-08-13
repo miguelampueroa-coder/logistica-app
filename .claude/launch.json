@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "enviazo-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/spaun/logistica-app/apps/web-client",
+      "port": 3001,
+      "autoPort": true
+    },
+    {
+      "name": "enviazo-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/spaun/logistica-app/apps/backend",
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}

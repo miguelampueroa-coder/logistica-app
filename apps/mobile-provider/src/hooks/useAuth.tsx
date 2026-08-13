@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
+import { registerForPushNotifications, setupNotificationHandler } from '../services/push';
 
 interface AuthContextType {
   user: any | null;
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    setupNotificationHandler();
     loadStoredAuth();
   }, []);
 
@@ -36,6 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (storedProfile) {
           setProfile(JSON.parse(storedProfile));
         }
+        registerForPushNotifications(storedToken).catch((err) =>
+          console.error('Error registering push token:', err)
+        );
       }
     } catch (error) {
       console.error('Error loading stored auth:', error);
@@ -56,6 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem('auth_token', authToken);
     await AsyncStorage.setItem('auth_user', JSON.stringify(userData));
     await AsyncStorage.setItem('auth_profile', JSON.stringify(profileData.profile));
+
+    registerForPushNotifications(authToken).catch((err) =>
+      console.error('Error registering push token:', err)
+    );
   };
 
   const signUp = async (email: string, password: string, name: string, phone?: string) => {
@@ -76,6 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem('auth_token', authToken);
     await AsyncStorage.setItem('auth_user', JSON.stringify(userData));
     await AsyncStorage.setItem('auth_profile', JSON.stringify(profileData.profile));
+
+    registerForPushNotifications(authToken).catch((err) =>
+      console.error('Error registering push token:', err)
+    );
   };
 
   const signOut = async () => {

@@ -23,6 +23,7 @@ import whatsappAdminRoutes from './modules/whatsapp/api/admin.routes.js';
 import { TrackingWebSocket } from './services/tracking-websocket.js';
 import { startWorkers, scheduleDailyMetrics, scheduleCleanup, connection as redisConn } from './services/background-jobs.js';
 import { setupSwagger } from './config/swagger.js';
+import { setupNotificationSubscribers } from './services/notification-subscribers.js';
 
 const app = express();
 const server = createServer(app);
@@ -102,8 +103,16 @@ if (env.WHATSAPP_ENABLED) {
   logger.info('WhatsApp Logistics AI module disabled (WHATSAPP_ENABLED=false)');
 }
 
+// Initialize event-driven notifications
+setupNotificationSubscribers();
+
 // WebSocket for real-time tracking
 const trackingWs = new TrackingWebSocket(server);
+
+// Connect EventBus to WebSocket broadcasts
+import { setTrackingWebSocket, setupTrackingEventSubscribers } from './services/tracking-event-emitter.js';
+setTrackingWebSocket(trackingWs);
+setupTrackingEventSubscribers();
 
 // Background jobs
 let workers: ReturnType<typeof startWorkers> = [];

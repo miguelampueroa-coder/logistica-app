@@ -16,7 +16,7 @@ export default function Navbar() {
           <div className="flex items-center">
             <Link href="/" className="flex items-center gap-2">
               <Package className="h-8 w-8 text-primary-600" />
-              <span className="text-xl font-bold text-gray-900">LogiApp</span>
+              <span className="text-xl font-bold text-gray-900">Enviazo</span>
             </Link>
           </div>
 

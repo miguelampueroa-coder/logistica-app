@@ -25,6 +25,7 @@ export default function VehiclesScreen() {
   const { token } = useAuth();
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     loadVehicles();
@@ -51,6 +52,8 @@ export default function VehiclesScreen() {
         {
           text: 'Agregar',
           onPress: async () => {
+            if (isAdding) return;
+            setIsAdding(true);
             try {
               await api.user.addVehicle(
                 {
@@ -63,6 +66,8 @@ export default function VehiclesScreen() {
               loadVehicles();
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Error al agregar vehículo');
+            } finally {
+              setIsAdding(false);
             }
           },
         },

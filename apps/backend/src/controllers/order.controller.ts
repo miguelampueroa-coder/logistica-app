@@ -1,25 +1,13 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { getSupabaseAdmin } from '../config/database.js';
+import { getSupabaseAdmin, withRetry } from '../config/database.js';
 import { calculatePrice, calculateDistance } from '../services/pricing.service.js';
 import { VehicleType, PaymentMethod } from '../types/index.js';
 import { PaymentService, PaymentProviderType } from '../services/payment.service.js';
-import { UnifiedNotificationService } from '../services/unified-notification.service.js';
-import { createPushProvider } from '../services/push-notification.service.js';
-import { createEmailProvider } from '../services/email.service.js';
+import { eventBus } from '../services/event-bus.js';
+import { logger } from '../services/logger.js';
 
 const paymentService = new PaymentService();
-let notificationService: UnifiedNotificationService | null = null;
-
-function getNotificationService(): UnifiedNotificationService {
-  if (!notificationService) {
-    notificationService = new UnifiedNotificationService(
-      createPushProvider(),
-      createEmailProvider()
-    );
-  }
-  return notificationService;
-}
 
 const PAYMENT_METHOD_MAP: Record<PaymentMethod, PaymentProviderType> = {
   card: 'stripe',
@@ -161,24 +149,26 @@ export async function createShipment(req: Request, res: Response): Promise<void>
       }
     }
 
-    const notifications = getNotificationService();
-
     const { data: clientUser } = await supabase
       .from('users')
-      .select('email, phone')
+      .select('email, phone, name')
       .eq('id', userId)
       .single();
 
-    if (clientUser) {
-      notifications.sendOrderConfirmed(
-        userId,
-        clientUser.email,
-        clientUser.phone || '',
-        shipmentData.id,
-        data.origin_address,
-        data.dest_address
-      ).catch(err => console.error('[Order] Client notification failed:', err));
-    }
+    eventBus.emitShipmentEvent({
+      type: 'shipment:created',
+      shipmentId: shipmentData.id,
+      userId,
+      metadata: {
+        userEmail: clientUser?.email,
+        userPhone: clientUser?.phone,
+        userName: clientUser?.name,
+        destination: data.dest_address,
+        price: priceBreakdown.totalPrice,
+        origin: data.origin_address,
+      },
+      timestamp: new Date(),
+    });
 
     const { data: nearbyProviders } = await supabase.rpc('find_nearby_providers', {
       p_lat: data.origin_lat,
@@ -187,14 +177,7 @@ export async function createShipment(req: Request, res: Response): Promise<void>
     });
 
     if (nearbyProviders && nearbyProviders.length > 0) {
-      const providerIds = nearbyProviders.map((p: { id: string }) => p.id);
-      notifications.sendNewOrderAlert(
-        providerIds,
-        shipmentData.id,
-        data.origin_address,
-        data.dest_address,
-        priceBreakdown.totalPrice
-      ).catch(err => console.error('[Order] Provider notification failed:', err));
+      logger.info(`New shipment ${shipmentData.id} notified to ${nearbyProviders.length} nearby providers`);
     }
 
     res.status(201).json({
@@ -242,6 +225,11 @@ export async function getAvailableShipments(req: Request, res: Response): Promis
 
 export async function acceptShipment(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user!.role !== 'provider') {
+      res.status(403).json({ error: 'Only providers can accept shipments' });
+      return;
+    }
+
     const providerId = req.user!.userId;
     const { id } = req.params;
     const { vehicle_id } = req.body;
@@ -309,38 +297,44 @@ export async function acceptShipment(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const notifications = getNotificationService();
-
     const { data: providerUser } = await supabase
       .from('users')
-      .select('name')
+      .select('name, phone')
       .eq('id', providerId)
       .single();
 
     const { data: clientUser } = await supabase
       .from('users')
-      .select('email, phone')
+      .select('email, phone, name')
       .eq('id', shipment.user_id)
       .single();
 
-    if (clientUser && providerUser) {
-      const { data: vehicleData } = await supabase
-        .from('vehicles')
-        .select('brand, model, plate')
-        .eq('id', vehicle_id)
-        .single();
+    const { data: vehicleData } = await supabase
+      .from('vehicles')
+      .select('brand, model, plate, type')
+      .eq('id', vehicle_id)
+      .single();
 
-      const vehicleInfo = vehicleData
-        ? `${vehicleData.brand || ''} ${vehicleData.model || ''} (${vehicleData.plate || ''})`.trim()
-        : 'N/A';
+    const vehicleInfo = vehicleData
+      ? `${vehicleData.brand || ''} ${vehicleData.model || ''} (${vehicleData.plate || ''})`.trim()
+      : 'N/A';
 
-      notifications.sendDriverAssigned(
-        shipment.user_id,
-        clientUser.email,
-        providerUser.name,
-        vehicleInfo
-      ).catch(err => console.error('[Order] Accept notification failed:', err));
-    }
+    eventBus.emitShipmentEvent({
+      type: 'shipment:accepted',
+      shipmentId: shipment.id,
+      userId: shipment.user_id,
+      providerId,
+      metadata: {
+        userEmail: clientUser?.email,
+        userPhone: clientUser?.phone,
+        userName: clientUser?.name,
+        providerName: providerUser?.name,
+        providerPhone: providerUser?.phone,
+        vehicleInfo,
+        vehicleType: vehicleData?.type,
+      },
+      timestamp: new Date(),
+    });
 
     res.json({ message: 'Shipment accepted successfully' });
   } catch (error) {
@@ -351,6 +345,11 @@ export async function acceptShipment(req: Request, res: Response): Promise<void>
 
 export async function pickupShipment(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user!.role !== 'provider') {
+      res.status(403).json({ error: 'Only providers can pick up shipments' });
+      return;
+    }
+
     const providerId = req.user!.userId;
     const { id } = req.params;
     const supabase = getSupabaseAdmin();
@@ -385,21 +384,32 @@ export async function pickupShipment(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const notifications = getNotificationService();
-
     const { data: clientUser } = await supabase
       .from('users')
-      .select('email, phone')
+      .select('email, phone, name')
       .eq('id', shipment.user_id)
       .single();
 
-    if (clientUser) {
-      notifications.sendPickedUp(
-        shipment.user_id,
-        clientUser.email,
-        shipment.id
-      ).catch(err => console.error('[Order] Pickup notification failed:', err));
-    }
+    const { data: provider } = await supabase
+      .from('users')
+      .select('name, phone')
+      .eq('id', providerId)
+      .single();
+
+    eventBus.emitShipmentEvent({
+      type: 'shipment:in_transit',
+      shipmentId: id,
+      userId: shipment.user_id,
+      providerId,
+      metadata: {
+        userEmail: clientUser?.email,
+        userPhone: clientUser?.phone,
+        userName: clientUser?.name,
+        providerName: provider?.name,
+        providerPhone: provider?.phone,
+      },
+      timestamp: new Date(),
+    });
 
     res.json({ message: 'Shipment picked up successfully' });
   } catch (error) {
@@ -410,6 +420,11 @@ export async function pickupShipment(req: Request, res: Response): Promise<void>
 
 export async function deliverShipment(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user!.role !== 'provider') {
+      res.status(403).json({ error: 'Only providers can deliver shipments' });
+      return;
+    }
+
     const providerId = req.user!.userId;
     const { id } = req.params;
     const supabase = getSupabaseAdmin();
@@ -447,27 +462,46 @@ export async function deliverShipment(req: Request, res: Response): Promise<void
 
     if (shipment.payment_id && shipment.payment_method) {
       const providerType = PAYMENT_METHOD_MAP[shipment.payment_method as PaymentMethod];
-      if (providerType) {
-        paymentService.confirmPayment(shipment.payment_id, providerType)
-          .catch(err => console.error('[Order] Payment confirmation failed:', err));
+
+      try {
+        await withRetry(
+          async () => {
+            const result = await paymentService.confirmPayment(
+              shipment.payment_id,
+              providerType as PaymentProviderType
+            );
+            if (!result.success) throw new Error(result.error || 'Payment confirmation failed');
+            return true;
+          },
+          3,
+          500
+        );
+        logger.info(`Payment ${shipment.payment_id} confirmed for shipment ${id}`);
+      } catch (paymentErr) {
+        logger.error({ err: paymentErr, shipmentId: id }, `Failed to confirm payment ${shipment.payment_id} after retries`);
+        res.status(500).json({ error: 'Payment confirmation failed. Shipment marked as delivered but payment pending.' });
+        return;
       }
     }
 
-    const notifications = getNotificationService();
-
     const { data: clientUser } = await supabase
       .from('users')
-      .select('email, phone')
+      .select('email, phone, name')
       .eq('id', shipment.user_id)
       .single();
 
-    if (clientUser) {
-      notifications.sendDelivered(
-        shipment.user_id,
-        clientUser.email,
-        shipment.id
-      ).catch(err => console.error('[Order] Delivery notification failed:', err));
-    }
+    eventBus.emitShipmentEvent({
+      type: 'shipment:delivered',
+      shipmentId: id,
+      userId: shipment.user_id,
+      providerId,
+      metadata: {
+        userEmail: clientUser?.email,
+        userPhone: clientUser?.phone,
+        userName: clientUser?.name,
+      },
+      timestamp: new Date(),
+    });
 
     res.json({ message: 'Shipment delivered successfully' });
   } catch (error) {
@@ -600,37 +634,44 @@ export async function cancelShipment(req: Request, res: Response): Promise<void>
       }
     }
 
-    const notifications = getNotificationService();
+    const { data: clientUser } = await supabase
+      .from('users')
+      .select('email, phone, name')
+      .eq('id', shipment.user_id)
+      .single();
 
-    const notifyUser = async (uid: string) => {
-      const { data: user } = await supabase
-        .from('users')
-        .select('email, phone')
-        .eq('id', uid)
-        .single();
-      return user;
-    };
-
-    const clientUser = await notifyUser(shipment.user_id);
-    if (clientUser) {
-      notifications.sendCancelled(
-        shipment.user_id,
-        clientUser.email,
-        shipment.id,
-        reason
-      ).catch(err => console.error('[Order] Cancel notification (client) failed:', err));
-    }
+    eventBus.emitShipmentEvent({
+      type: 'shipment:cancelled',
+      shipmentId: id,
+      userId: shipment.user_id,
+      providerId: shipment.provider_id || undefined,
+      metadata: {
+        userEmail: clientUser?.email,
+        userName: clientUser?.name,
+        cancellationReason: reason,
+      },
+      timestamp: new Date(),
+    });
 
     if (shipment.provider_id) {
-      const providerUser = await notifyUser(shipment.provider_id);
-      if (providerUser) {
-        notifications.sendCancelled(
-          shipment.provider_id,
-          providerUser.email,
-          shipment.id,
-          reason
-        ).catch(err => console.error('[Order] Cancel notification (provider) failed:', err));
-      }
+      const { data: providerUser } = await supabase
+        .from('users')
+        .select('email, phone, name')
+        .eq('id', shipment.provider_id)
+        .single();
+
+      eventBus.emitShipmentEvent({
+        type: 'shipment:cancelled',
+        shipmentId: id,
+        userId: shipment.provider_id,
+        metadata: {
+          userEmail: providerUser?.email,
+          userName: providerUser?.name,
+          cancellationReason: reason,
+          role: 'provider',
+        },
+        timestamp: new Date(),
+      });
     }
 
     res.json({ message: 'Shipment cancelled successfully' });

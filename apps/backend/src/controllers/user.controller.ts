@@ -8,6 +8,7 @@ export const updateProfileSchema = z.object({
   location_lat: z.number().optional(),
   location_lng: z.number().optional(),
   is_available: z.boolean().optional(),
+  role: z.enum(['client', 'provider']).optional(),
 });
 
 export const addVehicleSchema = z.object({

@@ -98,6 +98,14 @@ export const api = {
       fetchAPI<{ tracking: any }>(`/api/tracking/${shipmentId}`, { token }),
   },
 
+  payments: {
+    getProviders: () =>
+      fetchAPI<{ providers: string[] }>('/api/payments/providers'),
+
+    getByShipment: (shipmentId: string, token: string) =>
+      fetchAPI<{ payment: any }>(`/api/payments/${shipmentId}`, { token }),
+  },
+
   user: {
     getProfile: (token: string) =>
       fetchAPI<{ profile: any }>('/api/user/profile', { token }),

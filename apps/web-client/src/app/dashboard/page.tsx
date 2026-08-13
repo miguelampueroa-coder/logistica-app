@@ -1,11 +1,27 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { api } from '@/lib/api';
 import Link from 'next/link';
 import { Package, Clock, CheckCircle, Truck, Plus } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { profile } = useAuth();
+  const { profile, token } = useAuth();
+  const [stats, setStats] = useState({ total: 0, pending: 0, in_transit: 0, completed: 0 });
+
+  useEffect(() => {
+    if (!token) return;
+    api.orders.getMy(token)
+      .then(data => {
+        const shipments = data.shipments || [];
+        const pending = shipments.filter(s => s.status === 'pending').length;
+        const in_transit = shipments.filter(s => s.status === 'in_transit').length;
+        const completed = shipments.filter(s => s.status === 'delivered').length;
+        setStats({ total: shipments.length, pending, in_transit, completed });
+      })
+      .catch(() => {});
+  }, [token]);
 
   return (
     <div>
@@ -27,7 +43,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-sm text-gray-500">Total Envíos</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
             </div>
           </div>
         </div>
@@ -39,7 +55,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-sm text-gray-500">Pendientes</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.pending}</p>
             </div>
           </div>
         </div>
@@ -51,7 +67,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-sm text-gray-500">En Tránsito</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.in_transit}</p>
             </div>
           </div>
         </div>
@@ -63,7 +79,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-sm text-gray-500">Completados</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.completed}</p>
             </div>
           </div>
         </div>

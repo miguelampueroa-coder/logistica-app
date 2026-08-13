@@ -6,6 +6,35 @@ interface FetchOptions extends RequestInit {
   token?: string;
 }
 
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+function subscribeToRefresh(callback: (token: string) => void) {
+  refreshSubscribers.push(callback);
+}
+
+function notifyRefresh(token: string) {
+  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers = [];
+}
+
+async function refreshToken(token: string): Promise<string | null> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) return null;
+
+    const { token: newToken } = await response.json();
+    await AsyncStorage.setItem('auth_token', newToken);
+    return newToken;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, ...fetchOptions } = options;
 
@@ -18,10 +47,44 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  let response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...fetchOptions,
     headers,
   });
+
+  // Handle 401 — attempt token refresh
+  if (response.status === 401 && token) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      const newToken = await refreshToken(token);
+      isRefreshing = false;
+
+      if (newToken) {
+        notifyRefresh(newToken);
+        // Retry with new token
+        headers['Authorization'] = `Bearer ${newToken}`;
+        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...fetchOptions,
+          headers,
+        });
+      } else {
+        // Refresh failed — clear auth and sign out
+        await AsyncStorage.removeItem('auth_token');
+        await AsyncStorage.removeItem('auth_user');
+        throw new Error('Session expired. Please log in again.');
+      }
+    } else {
+      // Wait for refresh to complete
+      return new Promise((resolve, reject) => {
+        subscribeToRefresh((newToken) => {
+          headers['Authorization'] = `Bearer ${newToken}`;
+          fetch(`${API_BASE_URL}${endpoint}`, { ...fetchOptions, headers })
+            .then((res) => (res.ok ? res.json().then(resolve) : reject(res.statusText)))
+            .catch(reject);
+        });
+      });
+    }
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Network error' }));
@@ -80,6 +143,28 @@ export const api = {
 
     getMy: (token: string) =>
       fetchAPI<{ shipments: any[] }>('/api/orders', { token }),
+  },
+
+  tracking: {
+    reportLocation: (
+      shipmentId: string,
+      data: { lat: number; lng: number; speed?: number; heading?: number; accuracy?: number },
+      token: string
+    ) =>
+      fetchAPI<{ message: string; eta: number }>(`/api/tracking/${shipmentId}/location`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+        token,
+      }),
+  },
+
+  push: {
+    register: (data: { token: string; platform: 'ios' | 'android' }, token: string) =>
+      fetchAPI<{ message: string }>('/api/push/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+        token,
+      }),
   },
 
   user: {

@@ -16,6 +16,7 @@ export default function ProfilePage() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
+    role: 'client' as 'client' | 'provider',
   });
 
   useEffect(() => {
@@ -29,6 +30,7 @@ export default function ProfilePage() {
       setFormData({
         name: data.profile.name || '',
         phone: data.profile.phone || '',
+        role: data.profile.role || 'client',
       });
     } catch (err: any) {
       setError(err.message || 'Error al cargar perfil');
@@ -141,14 +143,17 @@ export default function ProfilePage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Rol
+                Tipo de Cuenta
               </label>
-              <input
-                type="text"
-                value={profile?.role === 'client' ? 'Cliente' : 'Prestador'}
-                disabled
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-500"
-              />
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'client' | 'provider' })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              >
+                <option value="client">Cliente (Enviar paquetes)</option>
+                <option value="provider">Prestador (Entregar paquetes)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Puedes cambiar entre tipos de cuenta cuando quieras</p>
             </div>
           </div>
 

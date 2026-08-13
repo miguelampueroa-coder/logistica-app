@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { Package, Truck, Shield, Clock, MapPin, CreditCard } from 'lucide-react';
+import WhatsAppButton from '@/components/WhatsAppButton';
 
 export default function HomePage() {
   const { user } = useAuth();
@@ -164,14 +165,21 @@ export default function HomePage() {
             ¿Listo para enviar?
           </h2>
           <p className="text-primary-100 text-lg mb-8">
-            Únete a miles de usuarios que ya confían en LogiApp
+            Únete a miles de usuarios que ya confían en Enviazo
           </p>
-          <Link
-            href={user ? '/dashboard/new-shipment' : '/register'}
-            className="inline-flex items-center justify-center bg-white text-primary-600 px-8 py-3 rounded-lg text-lg font-semibold hover:bg-primary-50 transition-colors"
-          >
-            Comenzar Ahora
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link
+              href={user ? '/dashboard/new-shipment' : '/register'}
+              className="inline-flex items-center justify-center bg-white text-primary-600 px-8 py-3 rounded-lg text-lg font-semibold hover:bg-primary-50 transition-colors"
+            >
+              Comenzar Ahora
+            </Link>
+            <WhatsAppButton
+              variant="hero"
+              message="Hola Enviazo, quiero enviar un paquete. ¿Cuál es el costo?"
+              phone="56912345678"
+            />
+          </div>
         </div>
       </div>
     </div>

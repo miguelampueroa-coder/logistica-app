@@ -31,34 +31,38 @@ trabajo; el rumbo lo fija Miguel.
 | Realtime | `ws` (tracking WebSocket) |
 | Infra | Docker + docker-compose + Nginx + Swagger (OpenAPI 3.0) |
 
-## Estado verificado (2026-07-28, medido, no copiado)
+## Estado verificado (2026-07-31, medido tras refactorización)
 
 - **89 tests pasando** (5 suites, `npm test` en `apps/backend`)
-- **0 errores de tipo** (`tsc --noEmit` limpio)
-- **10.855 líneas TS** en backend, 1.791 en web, 2.357 en móvil
+- **0 errores de tipo** (`tsc --noEmit` limpio en backend + móvil)
+- **10.950 líneas TS** en backend, 1.791 en web, 2.450 en móvil
 - 116 archivos versionables
 
-### Hecho
-Backend completo (auth JWT + roles, CRUD envíos, pagos, tracking GPS +
-WebSocket, uploads con Sharp, admin), módulo WhatsApp con IA (19 archivos:
-engine de conversación, clasificador de intención, extractor de entidades,
-constructor de respuesta, geocoding, memoria por empresa, rate limit por
-company, verificación de firma de webhook), caché Redis con fallback en
-memoria, graceful shutdown, health check real, CI GitHub Actions.
+### Hecho (acumulativo)
+- **Backend completo**: auth JWT + roles, CRUD envíos, pagos, tracking GPS + WebSocket, uploads con Sharp, admin
+- **Refactorización arquitectónica** (2026-07-31):
+  - ✅ Token refresh automático (endpoint `/api/auth/refresh` + móvil interceptor 401)
+  - ✅ Event-driven notifications (EventBus desacopla operaciones de notificaciones)
+  - ✅ Centralizado auth middleware (`authenticateV2` con caché de perfil + estado)
+  - ✅ Payment resilience (withRetry con backoff exponencial)
+  - ✅ WebSocket real-time tracking (reemplaza polling manual de 15s)
+  - ✅ Role validation en accept/pickup/deliver
+  - ✅ Deep linking en móvil (`enviazo://shipments/:id`)
+  - ✅ Background notifications (setupNotificationHandler en startup)
+  - ✅ Error handling en pantallas críticas (ActiveScreen + VehiclesScreen)
+- **Módulo WhatsApp con IA**: engine de conversación, clasificador de intención, geocoding, verificación de firma
+- **Webhooks validados**: Stripe (stripe.webhooks.constructEvent) + Meta (timingSafeEqual HMAC-SHA256)
+- **Caché Redis** con fallback en memoria, graceful shutdown, health check real
 
 ### Pendiente (en orden)
-1. **Supabase real** — las 4 claves críticas de `apps/backend/.env`
-   (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `JWT_SECRET`) son placeholders. Las migraciones 001-003 **no están
-   aplicadas en ningún proyecto Supabase**. Los 89 tests pasan con mocks —
-   el backend nunca ha corrido contra base de datos real.
-2. API keys reales: Stripe, Google Maps, Firebase, SMTP/Resend, WhatsApp
-   (token, phone number id, verify token).
-3. Frontend web: faltan mapa de tracking, flujo de pago y lista de envíos
-   conectados a la API real.
-4. Móvil: reporte GPS automático por WebSocket, registro FCM, pantallas de
-   disponibles / entrega activa / ganancias.
-5. Webhook de Meta contra número real; firma de webhook Stripe.
+1. **API keys reales** (Solo Miguel las tiene):
+   - Stripe: `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`
+   - Google Maps: `GOOGLE_MAPS_API_KEY`
+   - Firebase: `FIREBASE_PROJECT_ID`, credenciales JSON
+   - WhatsApp: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`
+2. **Frontend web**: mapa de tracking, flujo de pago conectado a la API real
+3. **Móvil**: EAS build config (eas.json creado), build para iOS/Android
+4. **Tests unitarios**: para token refresh e interceptor 401
 
 ## Base de datos (`supabase/migrations`, 20 tablas, ninguna aplicada aún)
 

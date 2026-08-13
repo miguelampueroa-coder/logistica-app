@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,18 +8,85 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../services/api';
+
+const LOCATION_REPORT_INTERVAL_MS = 15000;
+const LOCATION_REPORT_DISTANCE_M = 30;
 
 export default function ActiveScreen() {
   const { token } = useAuth();
   const [activeShipment, setActiveShipment] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
   useEffect(() => {
     loadActiveShipment();
   }, []);
+
+  // Reporta la posición del prestador mientras el envío va camino (accepted
+  // o in_transit); el backend reenvía cada update por WebSocket a quien lo
+  // esté siguiendo (tracking-websocket.ts).
+  useEffect(() => {
+    const shouldTrack =
+      activeShipment && (activeShipment.status === 'accepted' || activeShipment.status === 'in_transit');
+
+    if (!shouldTrack || !token) {
+      locationSubscription.current?.remove();
+      locationSubscription.current = null;
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (cancelled) return;
+
+      if (status !== 'granted') {
+        setLocationError('Permiso de ubicación rechazado. El tracking no funcionará.');
+        return;
+      }
+
+      setLocationError(null);
+
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: LOCATION_REPORT_INTERVAL_MS,
+          distanceInterval: LOCATION_REPORT_DISTANCE_M,
+        },
+        (position) => {
+          api.tracking
+            .reportLocation(
+              activeShipment.id,
+              {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                speed: position.coords.speed ?? undefined,
+                heading: position.coords.heading ?? undefined,
+                accuracy: position.coords.accuracy ?? undefined,
+              },
+              token
+            )
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : 'Error al reportar ubicación';
+              setLocationError(msg);
+              console.error('Error reporting location:', err);
+            });
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      locationSubscription.current?.remove();
+      locationSubscription.current = null;
+    };
+  }, [activeShipment?.id, activeShipment?.status, token]);
 
   const loadActiveShipment = async () => {
     try {
@@ -28,8 +95,11 @@ export default function ActiveScreen() {
         (s: any) => s.status === 'accepted' || s.status === 'in_transit'
       );
       setActiveShipment(active || null);
+      setLocationError(null);
     } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al cargar envío activo';
       console.error('Error loading active shipment:', error);
+      Alert.alert('Error', msg);
     } finally {
       setIsLoading(false);
     }

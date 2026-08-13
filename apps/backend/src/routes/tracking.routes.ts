@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { TrackingService } from '../services/tracking.service.js';
 import { createMapsService } from '../services/maps.service.js';
+import { broadcastLocationUpdate } from '../services/tracking-event-emitter.js';
 
 const router = Router();
 const trackingService = new TrackingService();
@@ -35,6 +36,7 @@ router.post('/:shipmentId/location', authenticate, async (req: Request, res: Res
     }
 
     // Report location
+    const timestamp = new Date().toISOString();
     await trackingService.reportLocation({
       shipmentId,
       providerId,
@@ -43,8 +45,11 @@ router.post('/:shipmentId/location', authenticate, async (req: Request, res: Res
       speed,
       heading,
       accuracy,
-      timestamp: new Date().toISOString(),
+      timestamp,
     });
+
+    // Broadcast to WebSocket subscribers in real-time (replaces 15s polling)
+    broadcastLocationUpdate(shipmentId, providerId, lat, lng, speed, heading);
 
     // Calculate ETA
     const eta = trackingService.calculateETA(

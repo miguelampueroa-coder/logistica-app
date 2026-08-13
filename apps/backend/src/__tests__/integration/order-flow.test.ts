@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 
 vi.mock('../../config/database.js', () => ({
   getSupabaseAdmin: vi.fn(),
+  withRetry: vi.fn(async (operation) => operation()),
 }));
 
 vi.mock('../../services/pricing.service.js', () => ({
@@ -27,8 +28,8 @@ vi.mock('../../services/payment.service.js', () => ({
         paymentUrl: 'https://pay.example.com/123',
         clientSecret: 'secret_123',
       }),
-      confirmPayment: vi.fn().mockResolvedValue(true),
-      refundPayment: vi.fn().mockResolvedValue(true),
+      confirmPayment: vi.fn().mockResolvedValue({ success: true }),
+      refundPayment: vi.fn().mockResolvedValue({ success: true }),
     };
   }),
   PaymentProviderType: {},
@@ -59,6 +60,16 @@ vi.mock('../../services/email.service.js', () => ({
   createEmailProvider: vi.fn().mockReturnValue({
     send: vi.fn().mockResolvedValue(true),
   }),
+}));
+
+vi.mock('../../services/event-bus.js', () => ({
+  eventBus: {
+    emitShipmentEvent: vi.fn(),
+  },
+}));
+
+vi.mock('../../services/notification-subscribers.js', () => ({
+  setupNotificationSubscribers: vi.fn(),
 }));
 
 import { getSupabaseAdmin } from '../../config/database.js';

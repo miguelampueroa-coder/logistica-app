@@ -1,10 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { api } from '@/lib/api';
-import { MapPin, Package, AlertCircle, CheckCircle } from 'lucide-react';
+import { MapPin, Package, AlertCircle, CheckCircle, CreditCard } from 'lucide-react';
+
+// El backend mapea payment_method -> proveedor (card->stripe, transfer->webpay,
+// cash->cash) pero solo registra un proveedor si sus credenciales existen. Sin
+// eso, crear un pago con ese método falla en silencio y el envío queda sin
+// pago vinculado. Por eso el método se restringe a /api/payments/providers.
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  card: 'Tarjeta (Stripe)',
+  transfer: 'Transferencia (Webpay)',
+  cash: 'Efectivo',
+};
+const PROVIDER_TO_METHOD: Record<string, string> = {
+  stripe: 'card',
+  webpay: 'transfer',
+  cash: 'cash',
+};
 
 export default function NewShipmentPage() {
   const { token } = useAuth();
@@ -12,6 +27,7 @@ export default function NewShipmentPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     // Package details
@@ -39,7 +55,18 @@ export default function NewShipmentPage() {
 
     // Options
     urgency: false,
+    payment_method: 'cash',
   });
+
+  useEffect(() => {
+    api.payments.getProviders().then(({ providers }) => {
+      const methods = providers.map((p) => PROVIDER_TO_METHOD[p]).filter(Boolean);
+      setPaymentMethods(methods);
+      if (methods.length > 0) {
+        setFormData((prev) => ({ ...prev, payment_method: methods[0] }));
+      }
+    }).catch(() => setPaymentMethods(['cash']));
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -334,6 +361,36 @@ export default function NewShipmentPage() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Payment */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Método de Pago
+          </h2>
+
+          {paymentMethods.length === 0 ? (
+            <p className="text-sm text-gray-500">Cargando métodos disponibles...</p>
+          ) : (
+            <select
+              name="payment_method"
+              value={formData.payment_method}
+              onChange={handleChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              {paymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {PAYMENT_METHOD_LABELS[method] || method}
+                </option>
+              ))}
+            </select>
+          )}
+          {paymentMethods.length === 1 && paymentMethods[0] === 'cash' && (
+            <p className="text-xs text-gray-500 mt-2">
+              Tarjeta y transferencia estarán disponibles próximamente.
+            </p>
+          )}
         </div>
 
         {/* Options */}

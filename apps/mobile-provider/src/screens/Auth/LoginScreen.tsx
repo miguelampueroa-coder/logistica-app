@@ -41,7 +41,7 @@ export default function LoginScreen({ navigation }: any) {
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.logo}>🚚</Text>
-          <Text style={styles.title}>LogiApp Provider</Text>
+          <Text style={styles.title}>Enviazo Provider</Text>
           <Text style={styles.subtitle}>Tomando envíos cerca de ti</Text>
         </View>
 

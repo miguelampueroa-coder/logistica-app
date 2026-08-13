@@ -1,4 +1,4 @@
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, LinkingOptions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../hooks/useAuth';
@@ -19,6 +19,21 @@ import HistoryScreen from '../screens/History/HistoryScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+const linking: LinkingOptions<any> = {
+  prefixes: ['enviazo://', 'https://enviazo.app/'],
+  config: {
+    screens: {
+      Disponibles: 'available',
+      ShipmentDetail: 'shipments/:id',
+      Activo: 'active',
+      Historial: 'history',
+      Perfil: 'profile',
+      Vehicles: 'profile/vehicles',
+      Earnings: 'profile/earnings',
+    },
+  },
+};
 
 function AuthStack() {
   return (
@@ -123,7 +138,7 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={user ? linking : undefined}>
       {user ? <MainTabs /> : <AuthStack />}
     </NavigationContainer>
   );
