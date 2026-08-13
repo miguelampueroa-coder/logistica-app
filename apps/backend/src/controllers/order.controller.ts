@@ -619,18 +619,45 @@ export async function cancelShipment(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // El refund se espera: si falla, el cliente tiene que enterarse. Antes esto
+    // corria en background y se marcaba 'refunded' aunque el reembolso fallara.
+    let refundStatus: 'not_applicable' | 'refunded' | 'failed' = 'not_applicable';
+    let refundError: string | undefined;
+
     if (shipment.payment_id && shipment.payment_method && shipment.total_price) {
       const providerType = PAYMENT_METHOD_MAP[shipment.payment_method as PaymentMethod];
       if (providerType) {
-        paymentService.refundPayment(shipment.payment_id, providerType, shipment.total_price)
-          .then(() => {
-            supabase
+        try {
+          const refund = await paymentService.refundPayment(
+            shipment.payment_id,
+            providerType,
+            shipment.total_price
+          );
+
+          if (refund.success) {
+            refundStatus = 'refunded';
+            await supabase
               .from('shipments')
               .update({ payment_status: 'refunded' })
-              .eq('id', id)
-              .then(() => {});
-          })
-          .catch(err => console.error('[Order] Refund failed:', err));
+              .eq('id', id);
+          } else {
+            refundStatus = 'failed';
+            refundError = refund.error || 'Refund was not completed by the provider';
+            await supabase
+              .from('shipments')
+              .update({ payment_status: 'refund_failed' })
+              .eq('id', id);
+            console.error('[Order] Refund failed for shipment', id, refundError);
+          }
+        } catch (err) {
+          refundStatus = 'failed';
+          refundError = err instanceof Error ? err.message : 'Unknown refund error';
+          await supabase
+            .from('shipments')
+            .update({ payment_status: 'refund_failed' })
+            .eq('id', id);
+          console.error('[Order] Refund threw for shipment', id, err);
+        }
       }
     }
 
@@ -674,7 +701,17 @@ export async function cancelShipment(req: Request, res: Response): Promise<void>
       });
     }
 
-    res.json({ message: 'Shipment cancelled successfully' });
+    if (refundStatus === 'failed') {
+      res.status(200).json({
+        message: 'Shipment cancelled, but the refund could not be processed',
+        refundStatus,
+        refundError,
+        action: 'Contact support to complete the refund manually',
+      });
+      return;
+    }
+
+    res.json({ message: 'Shipment cancelled successfully', refundStatus });
   } catch (error) {
     console.error('Cancel shipment error:', error);
     res.status(500).json({ error: 'Internal server error' });

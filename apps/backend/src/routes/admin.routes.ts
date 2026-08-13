@@ -143,7 +143,7 @@ router.get('/users/:id', async (req: Request, res: Response) => {
     const { data: ratings } = await supabase
       .from('ratings')
       .select('score, comment, created_at')
-      .or(`rated_user_id.eq.${id}`)
+      .eq('to_user_id', id)
       .order('created_at', { ascending: false })
       .limit(10);
 

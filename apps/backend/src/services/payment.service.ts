@@ -285,6 +285,11 @@ export class WebpayPaymentProvider implements PaymentProvider {
     };
   }
 
+  // Webpay Plus no envia firma HMAC: Transbank redirige el navegador al
+  // return_url con token_ws y la confirmacion autoritativa es el PUT a su API
+  // con las credenciales de comercio. Por eso no se valida ninguna firma aqui;
+  // lo que si se devuelve es el monto confirmado por Transbank para que quien
+  // llame lo contraste con el monto registrado en la BD antes de dar por pagado.
   async handleWebhook(
     payload: unknown,
     _signature: string
@@ -294,12 +299,19 @@ export class WebpayPaymentProvider implements PaymentProvider {
 
     if (!token) return null;
 
-    // Confirm the transaction to get the result
     const result = await this.confirmPayment(token);
 
+    // Solo se propagan datos que vienen de Transbank, nunca el body crudo del
+    // request: ese body lo controla quien hace el POST.
     return {
       event: result.success ? 'payment.succeeded' : 'payment.failed',
-      data: { token, ...data, confirmed: result.success },
+      data: {
+        token,
+        confirmed: result.success,
+        confirmedAmount: result.receipt?.amount,
+        transactionId: result.receipt?.transactionId,
+        error: result.error,
+      },
     };
   }
 }
@@ -321,12 +333,25 @@ export class CashPaymentProvider implements PaymentProvider {
     };
   }
 
-  async confirmPayment(paymentId: string): Promise<PaymentConfirmation> {
+  // El efectivo no lo puede confirmar solo el sistema: alguien tiene que haber
+  // recibido la plata. La ruta inyecta operatorConfirmed despues de validar que
+  // quien confirma es admin o el prestador asignado; el cliente no puede.
+  async confirmPayment(
+    paymentId: string,
+    payload?: Record<string, unknown>
+  ): Promise<PaymentConfirmation> {
+    if (!payload?.operatorConfirmed) {
+      return {
+        success: false,
+        error: 'Cash payments must be confirmed by the assigned provider or an admin',
+      };
+    }
+
     return {
       success: true,
       paymentId,
       receipt: {
-        amount: 0,
+        amount: typeof payload.amount === 'number' ? payload.amount : 0,
         method: 'cash',
         date: new Date().toISOString(),
         transactionId: paymentId,

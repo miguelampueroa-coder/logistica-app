@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { createAuthClient, getSupabaseAdmin } from '../config/database.js';
 import { generateToken } from '../middleware/auth.js';
+import { env } from '../config/env.js';
 import { User, UserRole } from '../types/index.js';
 
 export const registerSchema = z.object({
@@ -25,10 +26,14 @@ export async function register(req: Request, res: Response): Promise<void> {
     };
     const supabase = getSupabaseAdmin();
 
+    // En produccion el email se confirma por link, no automaticamente: si no,
+    // cualquiera registra un correo ajeno y queda con la cuenta activa.
+    const autoConfirmEmail = env.NODE_ENV !== 'production';
+
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      email_confirm: true,
+      email_confirm: autoConfirmEmail,
     });
 
     if (authError) {
@@ -50,6 +55,18 @@ export async function register(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const user = { id: authData.user.id, email, name, phone, role };
+
+    // Sin email confirmado no se entrega token: hay que verificar el correo primero.
+    if (!autoConfirmEmail) {
+      res.status(201).json({
+        message: 'User registered. Check your email to confirm your account before logging in.',
+        emailConfirmationRequired: true,
+        user,
+      });
+      return;
+    }
+
     const token = generateToken({
       userId: authData.user.id,
       email,
@@ -59,13 +76,8 @@ export async function register(req: Request, res: Response): Promise<void> {
     res.status(201).json({
       message: 'User registered successfully',
       token,
-      user: {
-        id: authData.user.id,
-        email,
-        name,
-        phone,
-        role,
-      },
+      emailConfirmationRequired: false,
+      user,
     });
   } catch (error) {
     console.error('Register error:', error);

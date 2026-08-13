@@ -96,7 +96,44 @@ router.post('/confirm', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await paymentService.confirmPayment(paymentId, method, payload);
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // El payload viene del cliente, asi que nunca se pasa tal cual: la marca de
+    // confirmacion la pone el servidor y solo si quien confirma tiene derecho.
+    const safePayload: Record<string, unknown> = { ...(payload || {}) };
+    delete safePayload.operatorConfirmed;
+
+    if (method === 'cash') {
+      const supabase = getSupabaseAdmin();
+      const { data: cashPayment } = await supabase
+        .from('payments')
+        .select('amount, shipment_id, shipments(provider_id)')
+        .eq('stripe_payment_id', paymentId)
+        .single();
+
+      if (!cashPayment) {
+        res.status(404).json({ error: 'Payment not found' });
+        return;
+      }
+
+      const shipmentRel = cashPayment.shipments as unknown as { provider_id: string | null } | null;
+      const isAssignedProvider = shipmentRel?.provider_id === req.user.userId;
+      if (req.user.role !== 'admin' && !isAssignedProvider) {
+        res.status(403).json({
+          error: 'Only the assigned provider or an admin can confirm a cash payment',
+        });
+        return;
+      }
+
+      safePayload.operatorConfirmed = true;
+      safePayload.operatorId = req.user.userId;
+      safePayload.amount = cashPayment.amount;
+    }
+
+    const result = await paymentService.confirmPayment(paymentId, method, safePayload);
 
     if (result.success) {
       res.json({
@@ -153,6 +190,31 @@ router.post('/refund', authenticate, async (req: Request, res: Response) => {
 router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => {
   try {
     const { shipmentId } = req.params;
+
+    if (!req.user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    // El pago solo lo puede ver el dueno del envio, el prestador asignado o un admin.
+    const supabase = getSupabaseAdmin();
+    const { data: shipment } = await supabase
+      .from('shipments')
+      .select('id, user_id, provider_id')
+      .eq('id', shipmentId)
+      .single();
+
+    if (!shipment) {
+      res.status(404).json({ error: 'Shipment not found' });
+      return;
+    }
+
+    const isOwner = shipment.user_id === req.user.userId;
+    const isAssignedProvider = shipment.provider_id === req.user.userId;
+    if (!isOwner && !isAssignedProvider && req.user.role !== 'admin') {
+      res.status(403).json({ error: 'Not authorized' });
+      return;
+    }
 
     const payment = await paymentService.getPaymentByShipment(shipmentId);
     if (!payment) {
@@ -211,29 +273,60 @@ router.post('/webhook/stripe', express.raw({type: 'application/json'}), async (r
 });
 
 // POST /api/payments/webhook/webpay — Webpay webhook handler
+// Webpay Plus no firma sus callbacks: Transbank devuelve el navegador al
+// return_url con token_ws y la unica prueba valida es confirmar el token contra
+// su API con las credenciales de comercio. Antes esta ruta trataba token_ws
+// (un dato publico) como si fuera una firma, lo que daba una falsa sensacion de
+// seguridad, y marcaba el pago como completado sin comparar el monto.
 router.post('/webhook/webpay', async (req: Request, res: Response) => {
   try {
-    // Extract signature from Transbank header or token_ws query param
-    const signature = (req.headers['x-transbank-signature'] || req.query.token_ws) as string;
-    if (!signature) {
-      logger.warn('Webpay webhook missing signature');
-      res.status(400).json({ error: 'Missing signature' });
+    const token = (req.body?.token_ws || req.query.token_ws) as string | undefined;
+    if (!token) {
+      logger.warn('Webpay webhook missing token_ws');
+      res.status(400).json({ error: 'Missing token_ws' });
       return;
     }
 
-    const result = await paymentService.handleWebhook('webpay', req.body, signature);
+    const result = await paymentService.handleWebhook('webpay', { token_ws: token }, '');
 
-    if (result?.event === 'payment.succeeded') {
-      const token = result.data.token as string;
-      // Update payment status
-      const supabase = getSupabaseAdmin();
-      await supabase
-        .from('payments')
-        .update({ status: 'completed' })
-        .eq('stripe_payment_id', token);
+    if (result?.event !== 'payment.succeeded') {
+      logger.warn({ token }, 'Webpay webhook not confirmed by Transbank');
+      res.json({ received: true, confirmed: false });
+      return;
     }
 
-    res.json({ received: true });
+    const supabase = getSupabaseAdmin();
+
+    // El pago tiene que existir en nuestra BD y coincidir en monto con lo que
+    // Transbank confirmo. Si no coincide, no se marca pagado.
+    const { data: payment } = await supabase
+      .from('payments')
+      .select('id, amount, status')
+      .eq('stripe_payment_id', token)
+      .single();
+
+    if (!payment) {
+      logger.warn({ token }, 'Webpay webhook for unknown token');
+      res.status(404).json({ error: 'Unknown payment token' });
+      return;
+    }
+
+    const confirmedAmount = result.data.confirmedAmount as number | undefined;
+    if (typeof confirmedAmount !== 'number' || Math.round(confirmedAmount) !== Math.round(payment.amount)) {
+      logger.error(
+        { token, expected: payment.amount, confirmed: confirmedAmount },
+        'Webpay amount mismatch, refusing to mark as paid'
+      );
+      res.status(409).json({ error: 'Amount mismatch' });
+      return;
+    }
+
+    await supabase
+      .from('payments')
+      .update({ status: 'completed' })
+      .eq('stripe_payment_id', token);
+
+    res.json({ received: true, confirmed: true });
   } catch (error) {
     console.error('[Payment] Webpay webhook error:', error);
     res.status(400).json({ error: 'Webhook error' });

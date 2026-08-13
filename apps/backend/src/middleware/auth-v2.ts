@@ -11,6 +11,9 @@ interface UserProfile {
   name: string;
   phone: string | null;
   role: UserRole;
+  // is_active: la cuenta esta habilitada. Es lo que decide si puede autenticarse.
+  is_active: boolean;
+  // is_available: el prestador esta libre para tomar envios. No afecta el login.
   is_available: boolean;
 }
 
@@ -38,7 +41,7 @@ async function getUserProfile(userId: string): Promise<UserProfile | null> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, name, phone, role, is_available')
+    .select('id, email, name, phone, role, is_active, is_available')
     .eq('id', userId)
     .single();
 
@@ -96,7 +99,9 @@ export async function authenticateV2(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    if (!profile.is_available) {
+    // Suspension se decide por is_active, no por is_available (que es
+    // "prestador disponible para tomar envios", ver migracion 004).
+    if (!profile.is_active) {
       res.status(403).json({ error: 'User account is suspended or inactive' });
       return;
     }
