@@ -28,14 +28,14 @@ export const createShipmentSchema = z.object({
   package_notes: z.string().optional(),
 
   origin_address: z.string().min(1, 'Origin address is required'),
-  origin_lat: z.number(),
-  origin_lng: z.number(),
+  origin_lat: z.number().min(-90).max(90, 'Latitude must be between -90 and 90'),
+  origin_lng: z.number().min(-180).max(180, 'Longitude must be between -180 and 180'),
   origin_contact_name: z.string().optional(),
   origin_contact_phone: z.string().optional(),
 
   dest_address: z.string().min(1, 'Destination address is required'),
-  dest_lat: z.number(),
-  dest_lng: z.number(),
+  dest_lat: z.number().min(-90).max(90, 'Latitude must be between -90 and 90'),
+  dest_lng: z.number().min(-180).max(180, 'Longitude must be between -180 and 180'),
   dest_contact_name: z.string().optional(),
   dest_contact_phone: z.string().optional(),
 

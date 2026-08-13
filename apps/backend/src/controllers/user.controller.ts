@@ -2,13 +2,16 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '../config/database.js';
 
+// El rol NO se edita desde aqui: esto lo llama el propio usuario sobre su
+// perfil, y permitirlo dejaba que un cliente se hiciera prestador solo y
+// empezara a tomar envios sin ninguna validacion. El cambio de rol pasa por
+// admin.
 export const updateProfileSchema = z.object({
   name: z.string().min(2).optional(),
   phone: z.string().optional(),
-  location_lat: z.number().optional(),
-  location_lng: z.number().optional(),
+  location_lat: z.number().min(-90).max(90, 'Latitude must be between -90 and 90').optional(),
+  location_lng: z.number().min(-180).max(180, 'Longitude must be between -180 and 180').optional(),
   is_available: z.boolean().optional(),
-  role: z.enum(['client', 'provider']).optional(),
 });
 
 export const addVehicleSchema = z.object({

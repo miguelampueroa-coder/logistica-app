@@ -376,8 +376,31 @@ export class PaymentService {
   constructor() {
     // Register available providers
     if (process.env.STRIPE_SECRET_KEY) {
-      this.providers.set('stripe', new StripePaymentProvider(process.env.STRIPE_SECRET_KEY));
+      const stripeKey = process.env.STRIPE_SECRET_KEY;
+
+      // No se puede validar la credencial contra Stripe aqui (el constructor no
+      // es async), pero si el error mas comun: pegar la clave publica (pk_) en
+      // vez de la secreta (sk_). Asi falla al arrancar y no en el primer cobro.
+      if (!stripeKey.startsWith('sk_') && !stripeKey.startsWith('rk_')) {
+        throw new Error(
+          '[Payment] STRIPE_SECRET_KEY no parece una clave secreta (debe empezar con sk_ o rk_). ' +
+          'Si empieza con pk_ es la clave publica y no sirve para cobrar.'
+        );
+      }
+
+      if (process.env.NODE_ENV === 'production' && stripeKey.startsWith('sk_test_')) {
+        console.warn('[Payment] ATENCION: corriendo en produccion con una clave de PRUEBA de Stripe');
+      }
+
+      this.providers.set('stripe', new StripePaymentProvider(stripeKey));
       console.log('[Payment] Stripe provider registered');
+    }
+
+    if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_WEBHOOK_SECRET) {
+      console.warn(
+        '[Payment] Stripe registrado sin STRIPE_WEBHOOK_SECRET: los webhooks van a fallar ' +
+        'la validacion de firma y los pagos no se marcaran como completados.'
+      );
     }
 
     if (process.env.WEBPAY_COMMERCE_CODE && process.env.WEBPAY_API_KEY) {

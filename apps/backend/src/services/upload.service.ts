@@ -148,7 +148,9 @@ export class UploadService {
 
     // Process image
     let processedBuffer = file.buffer;
-    let width = file.buffer.length;
+    // Solo las imagenes tienen dimensiones; para el resto quedan en 0 (antes
+    // width guardaba el tamano del archivo en bytes, que no es un ancho).
+    let width = 0;
     let height = 0;
 
     if (file.mimetype.startsWith('image/')) {

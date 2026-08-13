@@ -16,6 +16,15 @@
 -- hoy ningun cliente lee las tablas directo, todo pasa por la API.
 -- Al exponer tablas al navegador habra que otorgar a authenticated lo
 -- justo y apoyarse en las policies RLS, que hoy estan inertes por esto.
+--
+-- CUIDADO al hacerlo: las 10 tablas del modulo WhatsApp (companies,
+-- company_members, conversations, messages, dispatch_orders, company_memory,
+-- operator_assignments, webhook_events, crm_interactions, crm_daily_metrics)
+-- tienen RLS habilitado pero CERO policies (ver 005). Hoy eso no importa
+-- porque sin GRANT nadie llega, pero un GRANT a authenticated sobre ellas las
+-- deja legibles para cualquier usuario logueado, de todas las empresas a la
+-- vez. Escribir primero las policies filtrando por company_id via
+-- company_members, y recien despues otorgar.
 
 GRANT USAGE ON SCHEMA public TO service_role;
 
