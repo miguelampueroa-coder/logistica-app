@@ -71,11 +71,19 @@ router.post('/:shipmentId/location', authenticate, async (req: Request, res: Res
   }
 });
 
-// GET /api/tracking/active — Get all active trackings (admin/provider)
+// GET /api/tracking/active — Get active trackings (admin: all, provider: own)
 // Debe ir antes de /:shipmentId, que si no captura "active" como id.
 router.get('/active', authenticate, async (req: Request, res: Response) => {
   try {
-    const trackings = await trackingService.getActiveTrackings();
+    const role = req.user!.role;
+    const userId = req.user!.userId;
+
+    if (role !== 'admin' && role !== 'provider') {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const trackings = await trackingService.getActiveTrackings(role === 'provider' ? userId : undefined);
     res.json({ trackings, count: trackings.length });
   } catch (error) {
     console.error('[Tracking] Get active error:', error);
@@ -87,6 +95,13 @@ router.get('/active', authenticate, async (req: Request, res: Response) => {
 router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => {
   try {
     const { shipmentId } = req.params;
+    const userId = req.user!.userId;
+    const role = req.user!.role;
+
+    if (!(await canAccessShipment(shipmentId, userId, role))) {
+      res.status(404).json({ error: 'Shipment not found' });
+      return;
+    }
 
     const state = await trackingService.getTrackingState(shipmentId);
     if (!state) {
@@ -105,6 +120,14 @@ router.get('/:shipmentId', authenticate, async (req: Request, res: Response) => 
 router.post('/:shipmentId/route', authenticate, async (req: Request, res: Response) => {
   try {
     const { shipmentId } = req.params;
+    const userId = req.user!.userId;
+    const role = req.user!.role;
+
+    if (!(await canAccessShipment(shipmentId, userId, role))) {
+      res.status(404).json({ error: 'Shipment not found' });
+      return;
+    }
+
     const supabase = getSupabaseAdmin();
 
     const { data: shipment } = await supabase
@@ -163,5 +186,20 @@ router.post('/reverse-geocode', authenticate, async (req: Request, res: Response
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+async function canAccessShipment(shipmentId: string, userId: string, role: string): Promise<boolean> {
+  if (role === 'admin') return true;
+
+  const supabase = getSupabaseAdmin();
+  const { data: shipment } = await supabase
+    .from('shipments')
+    .select('user_id, provider_id')
+    .eq('id', shipmentId)
+    .single();
+
+  if (!shipment) return false;
+
+  return shipment.user_id === userId || shipment.provider_id === userId;
+}
 
 export default router;

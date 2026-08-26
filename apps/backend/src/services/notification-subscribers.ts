@@ -22,6 +22,17 @@ export function setupNotificationSubscribers(): void {
 
   const handler1 = async (event: ShipmentEvent) => {
     try {
+      const providerIds = event.metadata.nearbyProviderIds as string[] | undefined;
+      if (Array.isArray(providerIds) && providerIds.length > 0) {
+        await notificationService!.sendNewOrderAlert(
+          providerIds,
+          event.shipmentId,
+          event.metadata.origin,
+          event.metadata.destination,
+          event.metadata.price
+        );
+      }
+
       await notificationService!.send({
         channels: ['email'],
         userId: event.userId,

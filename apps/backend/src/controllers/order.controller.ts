@@ -155,6 +155,20 @@ export async function createShipment(req: Request, res: Response): Promise<void>
       .eq('id', userId)
       .single();
 
+    const { data: nearbyProviders } = await supabase.rpc('find_nearby_providers', {
+      p_lat: data.origin_lat,
+      p_lng: data.origin_lng,
+      p_radius_km: SEARCH_RADIUS_KM,
+    });
+
+    const nearbyProviderIds = Array.isArray(nearbyProviders)
+      ? nearbyProviders.map(p => p.provider_id)
+      : [];
+
+    if (nearbyProviderIds.length > 0) {
+      logger.info(`New shipment ${shipmentData.id} notified to ${nearbyProviderIds.length} nearby providers`);
+    }
+
     eventBus.emitShipmentEvent({
       type: 'shipment:created',
       shipmentId: shipmentData.id,
@@ -166,19 +180,10 @@ export async function createShipment(req: Request, res: Response): Promise<void>
         destination: data.dest_address,
         price: priceBreakdown.totalPrice,
         origin: data.origin_address,
+        nearbyProviderIds,
       },
       timestamp: new Date(),
     });
-
-    const { data: nearbyProviders } = await supabase.rpc('find_nearby_providers', {
-      p_lat: data.origin_lat,
-      p_lng: data.origin_lng,
-      p_radius_km: SEARCH_RADIUS_KM,
-    });
-
-    if (nearbyProviders && nearbyProviders.length > 0) {
-      logger.info(`New shipment ${shipmentData.id} notified to ${nearbyProviders.length} nearby providers`);
-    }
 
     res.status(201).json({
       message: 'Shipment created successfully',
@@ -601,6 +606,11 @@ export async function cancelShipment(req: Request, res: Response): Promise<void>
       return;
     }
 
+    if (role === 'provider' && shipment.provider_id !== userId) {
+      res.status(404).json({ error: 'Shipment not found' });
+      return;
+    }
+
     if (!['pending', 'accepted'].includes(shipment.status)) {
       res.status(400).json({ error: 'Shipment cannot be cancelled at this stage' });
       return;
@@ -610,6 +620,7 @@ export async function cancelShipment(req: Request, res: Response): Promise<void>
       .from('shipments')
       .update({
         status: 'cancelled',
+        cancellation_reason: reason,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);

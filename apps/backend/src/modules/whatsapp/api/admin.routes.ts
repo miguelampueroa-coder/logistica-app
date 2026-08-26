@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseAdmin } from '../../../config/database.js';
-import { authenticate } from '../../../middleware/auth.js';
+import { authenticate, authorize } from '../../../middleware/auth.js';
 import { NotificationEngine, LOGISTICS_TEMPLATES } from '../services/notification.engine.js';
 
 // NotificationEngine is injected via setNotificationEngine
@@ -12,8 +12,8 @@ export function setNotificationEngine(engine: NotificationEngine): void {
 
 const router = Router();
 
-// All admin routes require authentication
-router.use(authenticate);
+// All admin routes require authentication + admin role
+router.use(authenticate, authorize('admin'));
 
 // GET /api/whatsapp/conversations — List conversations
 router.get('/conversations', async (req: Request, res: Response) => {

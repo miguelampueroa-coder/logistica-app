@@ -59,7 +59,11 @@ export class LocalStorageProvider implements FileStorageProvider {
   }
 
   async delete(filePath: string): Promise<void> {
-    const fullPath = path.join(this.uploadDir, filePath);
+    const uploadRoot = path.resolve(this.uploadDir);
+    const fullPath = path.resolve(uploadRoot, filePath);
+    if (fullPath !== uploadRoot && !fullPath.startsWith(uploadRoot + path.sep)) {
+      return;
+    }
     await fs.unlink(fullPath).catch(() => {});
   }
 }

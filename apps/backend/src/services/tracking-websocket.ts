@@ -4,6 +4,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { verifyToken } from '../middleware/auth.js';
+import { getSupabaseAdmin } from '../config/database.js';
 
 interface TrackingSubscription {
   ws: WebSocket;
@@ -28,9 +29,13 @@ export class TrackingWebSocket {
   }
 
   private async handleConnection(ws: WebSocket, req: import('http').IncomingMessage): Promise<void> {
-    // Authenticate via query token
+    // Authenticate via Authorization header or query token (browsers cannot set headers)
     const url = new URL(req.url || '', `http://${req.headers.host}`);
-    const token = url.searchParams.get('token');
+    let token = url.searchParams.get('token');
+    const authHeader = req.headers.authorization;
+    if (!token && authHeader?.startsWith('Bearer ')) {
+      token = authHeader.slice(7);
+    }
 
     if (!token) {
       ws.close(4001, 'Authentication required');
@@ -55,7 +60,7 @@ export class TrackingWebSocket {
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
-        this.handleMessage(sub, msg);
+        void this.handleMessage(sub, msg);
       } catch {
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format' }));
       }
@@ -72,11 +77,11 @@ export class TrackingWebSocket {
     }));
   }
 
-  private handleMessage(sub: TrackingSubscription, msg: { type: string; shipmentId?: string; shipmentIds?: string[] }): void {
+  private async handleMessage(sub: TrackingSubscription, msg: { type: string; shipmentId?: string; shipmentIds?: string[] }): Promise<void> {
     switch (msg.type) {
       case 'subscribe':
         if (msg.shipmentId) {
-          this.subscribeToShipment(sub, msg.shipmentId);
+          await this.subscribeToShipment(sub, msg.shipmentId);
         }
         break;
 
@@ -88,7 +93,9 @@ export class TrackingWebSocket {
 
       case 'subscribe_bulk':
         if (Array.isArray(msg.shipmentIds)) {
-          msg.shipmentIds.forEach(id => this.subscribeToShipment(sub, id));
+          for (const id of msg.shipmentIds) {
+            await this.subscribeToShipment(sub, id);
+          }
         }
         break;
 
@@ -98,7 +105,16 @@ export class TrackingWebSocket {
     }
   }
 
-  private subscribeToShipment(sub: TrackingSubscription, shipmentId: string): void {
+  private async subscribeToShipment(sub: TrackingSubscription, shipmentId: string): Promise<void> {
+    if (!(await this.canAccessShipment(shipmentId, sub.userId, sub.role))) {
+      sub.ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Not authorized to subscribe to this shipment',
+        shipmentId,
+      }));
+      return;
+    }
+
     sub.shipmentIds.add(shipmentId);
 
     if (!this.shipmentClients.has(shipmentId)) {
@@ -110,6 +126,21 @@ export class TrackingWebSocket {
       type: 'subscribed',
       shipmentId,
     }));
+  }
+
+  private async canAccessShipment(shipmentId: string, userId: string, role: string): Promise<boolean> {
+    if (role === 'admin') return true;
+
+    const supabase = getSupabaseAdmin();
+    const { data: shipment } = await supabase
+      .from('shipments')
+      .select('user_id, provider_id')
+      .eq('id', shipmentId)
+      .single();
+
+    if (!shipment) return false;
+
+    return shipment.user_id === userId || shipment.provider_id === userId;
   }
 
   private unsubscribeFromShipment(sub: TrackingSubscription, shipmentId: string): void {

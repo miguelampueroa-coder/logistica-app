@@ -3,6 +3,7 @@
 
 import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
+import { env } from '../config/env.js';
 
 // Redis connection (shared across all queues)
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -225,13 +226,17 @@ export async function scheduleCleanup(): Promise<void> {
     repeat: { pattern: '0 3 * * 0' }, // Sundays at 3 AM
   });
 
-  // Clean location history older than 7 days
-  await cleanupQueue.add('cleanup-locations', {
-    type: 'location_history',
-    olderThanDays: 7,
-  }, {
-    repeat: { pattern: '0 3 * * 1' }, // Mondays at 3 AM
-  });
+  // Clean location history older than the configured retention
+  // (0 = conservar indefinidamente, requerido por la trazabilidad/bitacora)
+  const locationRetentionDays = env.LOCATION_HISTORY_RETENTION_DAYS;
+  if (locationRetentionDays > 0) {
+    await cleanupQueue.add('cleanup-locations', {
+      type: 'location_history',
+      olderThanDays: locationRetentionDays,
+    }, {
+      repeat: { pattern: '0 3 * * 1' }, // Mondays at 3 AM
+    });
+  }
 
   // Clean stale FCM tokens
   await cleanupQueue.add('cleanup-tokens', {

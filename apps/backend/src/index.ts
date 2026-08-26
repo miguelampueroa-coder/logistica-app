@@ -57,6 +57,32 @@ const authLimiter = rateLimit({
 app.use('/api/auth', authLimiter);
 app.use('/api', generalLimiter);
 
+// WhatsApp Logistics AI
+let whatsappModule: WhatsAppModule | undefined;
+if (env.WHATSAPP_ENABLED) {
+  whatsappModule = WhatsAppModule.create({
+    enabled: true,
+    whatsapp: {
+      accessToken: env.WHATSAPP_ACCESS_TOKEN || '',
+      phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID || '',
+      verifyToken: env.WHATSAPP_VERIFY_TOKEN || '',
+      apiVersion: env.WHATSAPP_API_VERSION,
+    },
+    defaultCompanyId: env.WHATSAPP_DEFAULT_COMPANY_ID,
+  });
+  logger.info('WhatsApp Logistics AI module loaded');
+} else {
+  logger.info('WhatsApp Logistics AI module disabled (WHATSAPP_ENABLED=false)');
+}
+
+// Webhook routes need the raw body BEFORE global JSON parsing
+if (whatsappModule) {
+  app.use('/webhook', createWebhookRoutes(whatsappModule));
+}
+
+// Stripe webhook signature validation needs the raw body too
+app.use('/api/payments/webhook/stripe', express.raw({ type: 'application/json' }));
+
 // Body parsing
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -81,26 +107,9 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/push', pushRoutes);
 
-// WhatsApp Logistics AI
-let whatsappModule: WhatsAppModule | undefined;
-if (env.WHATSAPP_ENABLED) {
-  whatsappModule = WhatsAppModule.create({
-    enabled: true,
-    whatsapp: {
-      accessToken: env.WHATSAPP_ACCESS_TOKEN || '',
-      phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID || '',
-      verifyToken: env.WHATSAPP_VERIFY_TOKEN || '',
-      apiVersion: env.WHATSAPP_API_VERSION,
-    },
-    defaultCompanyId: env.WHATSAPP_DEFAULT_COMPANY_ID,
-  });
-
-  app.use('/webhook', createWebhookRoutes(whatsappModule));
+// WhatsApp admin routes (mounted after global JSON parsing)
+if (whatsappModule) {
   app.use('/api/whatsapp', whatsappAdminRoutes);
-
-  logger.info('WhatsApp Logistics AI module loaded');
-} else {
-  logger.info('WhatsApp Logistics AI module disabled (WHATSAPP_ENABLED=false)');
 }
 
 // Initialize event-driven notifications

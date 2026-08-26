@@ -32,6 +32,7 @@ const envSchema = z.object({
 
   // Redis (Background Jobs)
   REDIS_URL: z.string().default('redis://localhost:6379'),
+  LOCATION_HISTORY_RETENTION_DAYS: z.coerce.number().default(90),
 
   // Email
   SMTP_HOST: z.string().optional(),

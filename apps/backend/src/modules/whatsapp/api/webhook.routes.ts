@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import express, { Router, Request, Response, NextFunction } from 'express';
 import { WhatsAppModule } from '../index.js';
 
 declare global {
@@ -9,15 +9,13 @@ declare global {
   }
 }
 
-function captureRawBody(req: Request, _res: Response, next: NextFunction): void {
-  let body = '';
-  req.on('data', (chunk: Buffer) => {
-    body += chunk.toString();
+function captureRawBody(req: Request, res: Response, next: NextFunction): void {
+  const jsonParser = express.json({
+    verify: (_req, _res, buf) => {
+      req.rawBody = buf;
+    },
   });
-  req.on('end', () => {
-    req.rawBody = Buffer.from(body);
-    next();
-  });
+  jsonParser(req, res, next);
 }
 
 export function createWebhookRoutes(whatsapp: WhatsAppModule): Router {

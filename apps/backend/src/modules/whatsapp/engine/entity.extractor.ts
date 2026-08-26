@@ -1,4 +1,4 @@
-import { ExtractedEntities, AddressEntity, RecipientEntity, PackageEntity } from '../types/index.js';
+import { ExtractedEntities, AddressEntity, RecipientEntity, PackageEntity, ConversationStep } from '../types/index.js';
 
 const PHONE_REGEX = /(?:\+?56)?\s*(?:9\s*)?\d{4}[\s.-]?\d{4}/;
 const PHONE_CLEAN_REGEX = /[\s.\-+]/g;
@@ -30,7 +30,7 @@ const SIZE_KEYWORDS: Record<string, { l: number; w: number; h: number }> = {
 const URGENCY_KEYWORDS = /(?:urgente|rápido|rapido|ya|ahora|enseguida|lo antes posible|express|ipsum)/i;
 
 export class EntityExtractor {
-  extract(text: string): ExtractedEntities {
+  extract(text: string, currentStep?: ConversationStep): ExtractedEntities {
     const entities: ExtractedEntities = {};
 
     // Extract recipient (name + phone)
@@ -48,6 +48,16 @@ export class EntityExtractor {
     // Extract urgency
     entities.urgency = URGENCY_KEYWORDS.test(text);
 
+    // In an active order flow, the direct answer to "origen/destino" is an address
+    const address = this.extractAddressInFlow(text, currentStep);
+    if (address) {
+      if (currentStep === 'collecting_destination') {
+        entities.destination = address;
+      } else if (currentStep === 'collecting_origin') {
+        entities.origin = address;
+      }
+    }
+
     return entities;
   }
 
@@ -63,6 +73,23 @@ export class EntityExtractor {
     if (!looksLikeAddress) return undefined;
 
     return { address: cleaned };
+  }
+
+  private extractAddressInFlow(
+    text: string,
+    currentStep?: ConversationStep
+  ): AddressEntity | undefined {
+    if (currentStep !== 'collecting_origin' && currentStep !== 'collecting_destination') {
+      return undefined;
+    }
+
+    const cleaned = text.trim();
+    if (cleaned.length < 5) return undefined;
+
+    const looksLikeRejection = /^(?:no\b|no se\b|no sé\b|nada\b|ns\b|cancelar\b)/i.test(cleaned);
+    if (looksLikeRejection) return undefined;
+
+    return this.extractAddress(cleaned) ?? { address: cleaned };
   }
 
   extractLocationFromShared(

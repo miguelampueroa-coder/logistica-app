@@ -31,16 +31,18 @@ export class OrderService {
 
   /**
    * Notify customer when a provider accepts the shipment.
+   * Solo para pedidos creados por WhatsApp: si no hay conversation/dispatch_order
+   * (customer_phone), no se notifica (los demas canales lo hacen por push/email).
    */
   async notifyProviderAssigned(
     shipmentId: string,
-    providerId: string,
-    companyPhone: string
+    providerId: string
   ): Promise<void> {
     if (!this.notificationEngine) return;
 
     const supabase = getSupabaseAdmin();
     const customerPhone = await this.getCustomerPhone(shipmentId);
+    if (!customerPhone) return;
 
     const { data: provider } = await supabase
       .from('users')
@@ -50,7 +52,7 @@ export class OrderService {
 
     if (provider) {
       await this.notificationEngine.notifyCustomerDriverAssigned(
-        customerPhone || companyPhone,
+        customerPhone,
         provider.name || 'Repartidor',
         provider.phone || 'Sin teléfono'
       );

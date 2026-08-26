@@ -128,7 +128,7 @@ export class ConversationEngine {
     const isFlowActive = context.currentStep.startsWith('collecting_') || context.currentStep === 'confirming_quote';
 
     // Extract entities
-    const entities = this.entityExtractor.extract(customerText);
+    const entities = this.entityExtractor.extract(customerText, context.currentStep);
 
     // Handle location shares
     if (msg.location) {

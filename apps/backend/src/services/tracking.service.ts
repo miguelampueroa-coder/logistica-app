@@ -170,14 +170,20 @@ export class TrackingService {
   /**
    * Get all active shipments being tracked.
    */
-  async getActiveTrackings(): Promise<TrackingState[]> {
+  async getActiveTrackings(providerId?: string): Promise<TrackingState[]> {
     const supabase = getSupabaseAdmin();
 
-    const { data: shipments } = await supabase
+    let query = supabase
       .from('shipments')
       .select('id')
       .in('status', ['accepted', 'in_transit'])
       .not('provider_id', 'is', null);
+
+    if (providerId) {
+      query = query.eq('provider_id', providerId);
+    }
+
+    const { data: shipments } = await query;
 
     if (!shipments) return [];
 

@@ -117,6 +117,12 @@ router.post(
 router.delete('/:filename', authenticate, async (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
+
+    if (!isSafeFilename(filename)) {
+      res.status(400).json({ error: 'Invalid filename' });
+      return;
+    }
+
     await uploadService.deleteFile(filename);
     res.json({ message: 'File deleted' });
   } catch (error) {
@@ -124,5 +130,9 @@ router.delete('/:filename', authenticate, async (req: Request, res: Response) =>
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+function isSafeFilename(filename: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$/.test(filename);
+}
 
 export default router;

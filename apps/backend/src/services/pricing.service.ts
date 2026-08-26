@@ -29,7 +29,7 @@ function buildQuoteCacheKey(
   volumeM3: number,
   urgency: boolean
 ): string {
-  return `quote:${originLat}:${originLng}:${destLat}:${destLng}:${vehicleType}:${weight}:${volumeM3}:${urgency}`;
+  return `${PRICING_CACHE_PREFIX}:${originLat}:${originLng}:${destLat}:${destLng}:${vehicleType}:${weight}:${volumeM3}:${urgency}`;
 }
 
 export function calculatePrice(

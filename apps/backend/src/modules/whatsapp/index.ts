@@ -13,6 +13,7 @@ import { AudioTranscriptionService } from './services/audio-transcription.servic
 import { ImageAnalysisService } from './services/image-analysis.service.js';
 import { NotificationEngine } from './services/notification.engine.js';
 import { setNotificationEngine } from './api/admin.routes.js';
+import { eventBus } from '../../services/event-bus.js';
 
 export interface WhatsAppModuleConfig {
   enabled: boolean;
@@ -95,6 +96,20 @@ export class WhatsAppModule {
     const notificationEngine = new NotificationEngine(channelManager);
     orderService.setNotificationEngine(notificationEngine);
     setNotificationEngine(notificationEngine);
+
+    // Notify WhatsApp customers on shipment lifecycle events (solo pedidos
+    // creados por chat: cada notify chequea que exista customer_phone).
+    eventBus.on('shipment:accepted', (event) => {
+      if (event.providerId) {
+        void orderService.notifyProviderAssigned(event.shipmentId, event.providerId);
+      }
+    });
+    eventBus.on('shipment:in_transit', (event) => {
+      void orderService.notifyPickedUp(event.shipmentId);
+    });
+    eventBus.on('shipment:delivered', (event) => {
+      void orderService.notifyDelivered(event.shipmentId);
+    });
 
     // Webhook Gateway
     const webhookGateway = new WebhookGateway(channelManager);
