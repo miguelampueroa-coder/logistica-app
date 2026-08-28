@@ -18,6 +18,7 @@ vi.mock('../../services/pricing.service.js', () => ({
     totalPrice: 650,
   }),
   calculateDistance: vi.fn().mockReturnValue(5.5),
+  resolveDistanceKm: vi.fn().mockResolvedValue({ distanceKm: 5.5, source: 'route', durationMin: 12 }),
 }));
 
 vi.mock('../../services/payment.service.js', () => ({

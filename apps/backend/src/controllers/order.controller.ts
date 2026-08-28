@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { getSupabaseAdmin, withRetry } from '../config/database.js';
-import { calculatePrice, calculateDistance } from '../services/pricing.service.js';
+import { calculatePrice, resolveDistanceKm } from '../services/pricing.service.js';
 import { VehicleType, PaymentMethod } from '../types/index.js';
+import { getEffectiveCapacity, VEHICLE_TYPE_VALUES } from '../config/vehicles.js';
 import { PaymentService, PaymentProviderType } from '../services/payment.service.js';
 import { eventBus } from '../services/event-bus.js';
 import { logger } from '../services/logger.js';
@@ -41,7 +42,7 @@ export const createShipmentSchema = z.object({
 
   urgency: z.boolean().default(false),
   scheduled_at: z.string().datetime().optional(),
-  preferred_vehicle_type: z.enum(['moto', 'auto', 'furgoneta', 'camioneta', 'microbus', 'camion']).optional(),
+  preferred_vehicle_type: z.enum(VEHICLE_TYPE_VALUES).optional(),
   payment_method: z.enum(['card', 'transfer', 'cash']).default('card'),
 });
 
@@ -51,12 +52,22 @@ export async function createShipment(req: Request, res: Response): Promise<void>
     const data = req.body;
     const supabase = getSupabaseAdmin();
 
-    const distanceKm = calculateDistance(
+    // Distancia real de carretera, no linea recta: en la zona sur la diferencia
+    // se la come el prestador (Puerto Montt-Castro son ~85 km en linea recta y
+    // ~180 km reales mas transbordo).
+    const { distanceKm, source: distanceSource } = await resolveDistanceKm(
       data.origin_lat,
       data.origin_lng,
       data.dest_lat,
       data.dest_lng
     );
+
+    if (distanceSource === 'estimate') {
+      logger.warn(
+        { origin: data.origin_address, dest: data.dest_address, distanceKm },
+        'Envio cotizado sin ruta real: revisar el proveedor de mapas'
+      );
+    }
 
     const packageVolumeM3 =
       (data.package_length_cm * data.package_width_cm * data.package_height_cm) / 1000000;
@@ -247,7 +258,7 @@ export async function acceptShipment(req: Request, res: Response): Promise<void>
 
     const { data: vehicle, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('id')
+      .select('id, type, capacity_kg, capacity_m3')
       .eq('id', vehicle_id)
       .eq('user_id', providerId)
       .eq('is_active', true)
@@ -272,6 +283,40 @@ export async function acceptShipment(req: Request, res: Response): Promise<void>
     if (shipment.status !== 'pending') {
       res.status(400).json({ error: 'Shipment is not available' });
       return;
+    }
+
+    // El vehiculo tiene que poder con el paquete. capacity_kg y capacity_m3
+    // existian en la tabla desde el principio pero nadie los comparaba: una
+    // moto podia aceptar un envio de 200 kg.
+    const { data: pkg } = await supabase
+      .from('packages')
+      .select('weight_kg, length_cm, width_cm, height_cm')
+      .eq('id', shipment.package_id)
+      .single();
+
+    if (pkg) {
+      const { capacityKg, capacityM3 } = getEffectiveCapacity(
+        vehicle.type as VehicleType,
+        vehicle.capacity_kg,
+        vehicle.capacity_m3
+      );
+      const packageVolumeM3 = (pkg.length_cm * pkg.width_cm * pkg.height_cm) / 1_000_000;
+
+      if (pkg.weight_kg > capacityKg) {
+        res.status(400).json({
+          error: `El paquete pesa ${pkg.weight_kg} kg y este vehículo admite hasta ${capacityKg} kg`,
+          reason: 'vehicle_capacity_kg',
+        });
+        return;
+      }
+
+      if (packageVolumeM3 > capacityM3) {
+        res.status(400).json({
+          error: `El paquete ocupa ${packageVolumeM3.toFixed(2)} m³ y este vehículo admite hasta ${capacityM3} m³`,
+          reason: 'vehicle_capacity_m3',
+        });
+        return;
+      }
     }
 
     const { error: updateError } = await supabase

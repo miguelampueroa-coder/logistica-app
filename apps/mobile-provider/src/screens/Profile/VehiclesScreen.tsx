@@ -12,13 +12,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../services/api';
 
+// Estas capacidades no son solo texto: el backend las aplica al aceptar un
+// envío (config/vehicles.ts). Si cambian aquí, hay que cambiarlas allá.
 const VEHICLE_TYPES = [
+  { value: 'bicicleta', label: 'Bicicleta', icon: '🚲', capacity: 'Hasta 8kg' },
   { value: 'moto', label: 'Moto', icon: '🏍️', capacity: 'Hasta 10kg' },
   { value: 'auto', label: 'Auto', icon: '🚗', capacity: 'Hasta 50kg' },
   { value: 'furgoneta', label: 'Furgoneta', icon: '🚐', capacity: 'Hasta 200kg' },
   { value: 'camioneta', label: 'Camioneta', icon: '🛻', capacity: 'Hasta 500kg' },
   { value: 'microbus', label: 'Microbús', icon: '🚌', capacity: 'Hasta 1000kg' },
   { value: 'camion', label: 'Camión', icon: '🚛', capacity: 'Hasta 5000kg' },
+  { value: 'barco', label: 'Barco', icon: '⛵', capacity: 'Hasta 2000kg' },
 ];
 
 export default function VehiclesScreen() {

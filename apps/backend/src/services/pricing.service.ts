@@ -1,5 +1,8 @@
 import { VehicleType, PriceBreakdown } from '../types/index.js';
 import { getCacheService } from './cache.service.js';
+import { createMapsService, MapsService } from './maps.service.js';
+import { VEHICLE_SPECS } from '../config/vehicles.js';
+import { logger } from './logger.js';
 
 const BASE_RATE = 700;
 const URGENCY_FEE = 300;
@@ -8,16 +11,78 @@ const WEIGHT_FEE_PER_KG = 100;
 const VOLUME_THRESHOLD = 0.5;
 const VOLUME_FEE_PER_M3 = 500;
 
-const VEHICLE_MULTIPLIERS: Record<VehicleType, number> = {
-  moto: 1.0,
-  auto: 1.2,
-  furgoneta: 1.5,
-  camioneta: 1.8,
-  microbus: 2.2,
-  camion: 2.5,
-};
+// Los multiplicadores viven en config/vehicles.ts junto a la capacidad, para
+// que agregar un tipo de vehiculo sea un solo cambio y no dos tablas que se
+// desincronizan.
 
 const PRICING_CACHE_PREFIX = 'pricing';
+
+// Factor de rodeo: cuanto mas larga es la ruta real que la linea recta.
+// La linea recta subestima siempre, y en la zona sur (fiordos, peninsulas,
+// caminos que bordean la costa) la diferencia es grande: Puerto Montt-Castro
+// son ~85 km en linea recta y ~180 km por carretera mas el transbordo.
+// 1.35 es el valor tipico en terreno normal; se usa SOLO como respaldo cuando
+// no se pudo obtener la ruta real, para no cobrarle de menos al prestador.
+const ROAD_CIRCUITY_FACTOR = 1.35;
+
+let mapsServiceInstance: MapsService | null = null;
+
+function getMaps(): MapsService {
+  if (!mapsServiceInstance) {
+    mapsServiceInstance = createMapsService();
+  }
+  return mapsServiceInstance;
+}
+
+export interface DistanceResult {
+  distanceKm: number;
+  /** 'route' = distancia real de carretera. 'estimate' = linea recta ajustada. */
+  source: 'route' | 'estimate';
+  durationMin?: number;
+}
+
+/**
+ * Distancia a cobrar entre dos puntos.
+ *
+ * Usa la ruta real (Google Directions, o OSRM si no hay API key). Si el
+ * proveedor falla o devuelve 0, cae a la linea recta ajustada por el factor de
+ * rodeo. Nunca devuelve 0 con coordenadas distintas: un 0 se convertiria en un
+ * envio gratis.
+ */
+export async function resolveDistanceKm(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number
+): Promise<DistanceResult> {
+  try {
+    const route = await getMaps().getRoute(
+      { lat: originLat, lng: originLng },
+      { lat: destLat, lng: destLng }
+    );
+
+    if (route.distanceKm > 0) {
+      return {
+        distanceKm: route.distanceKm,
+        source: 'route',
+        durationMin: route.durationMin > 0 ? route.durationMin : undefined,
+      };
+    }
+
+    logger.warn(
+      { originLat, originLng, destLat, destLng },
+      'Ruteo devolvio 0 km, se cobra por linea recta ajustada'
+    );
+  } catch (error) {
+    logger.warn({ err: error }, 'Ruteo fallo, se cobra por linea recta ajustada');
+  }
+
+  const straight = calculateDistance(originLat, originLng, destLat, destLng);
+  return {
+    distanceKm: Math.round(straight * ROAD_CIRCUITY_FACTOR * 100) / 100,
+    source: 'estimate',
+  };
+}
 
 function buildQuoteCacheKey(
   originLat: number,
@@ -49,7 +114,7 @@ export function calculatePrice(
       ? Math.ceil((packageVolumeM3 - VOLUME_THRESHOLD) * VOLUME_FEE_PER_M3)
       : 0;
   const urgencyFee = urgency ? URGENCY_FEE : 0;
-  const vehicleMultiplier = VEHICLE_MULTIPLIERS[vehicleType] || 1.0;
+  const vehicleMultiplier = VEHICLE_SPECS[vehicleType]?.priceMultiplier ?? 1.0;
   const subtotal = basePrice + weightFee + volumeFee + urgencyFee;
   const totalPrice = Math.ceil(subtotal * vehicleMultiplier);
 
@@ -79,7 +144,7 @@ export async function calculatePriceCached(
   const cached = await cache.get<PriceBreakdown>(cacheKey);
   if (cached) return cached;
 
-  const distanceKm = calculateDistance(originLat, originLng, destLat, destLng);
+  const { distanceKm } = await resolveDistanceKm(originLat, originLng, destLat, destLng);
   const result = calculatePrice(distanceKm, weight, volumeM3, vehicleType, urgency);
 
   await cache.set(cacheKey, result, 300);

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '../config/database.js';
+import { VEHICLE_TYPE_VALUES } from '../config/vehicles.js';
 
 // El rol NO se edita desde aqui: esto lo llama el propio usuario sobre su
 // perfil, y permitirlo dejaba que un cliente se hiciera prestador solo y
@@ -15,7 +16,7 @@ export const updateProfileSchema = z.object({
 });
 
 export const addVehicleSchema = z.object({
-  type: z.enum(['moto', 'auto', 'furgoneta', 'camioneta', 'microbus', 'camion']),
+  type: z.enum(VEHICLE_TYPE_VALUES),
   brand: z.string().optional(),
   model: z.string().optional(),
   year: z.number().optional(),

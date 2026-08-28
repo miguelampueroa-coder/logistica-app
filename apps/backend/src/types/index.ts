@@ -1,6 +1,16 @@
 export type UserRole = 'client' | 'provider' | 'admin';
 
-export type VehicleType = 'moto' | 'auto' | 'furgoneta' | 'camioneta' | 'microbus' | 'camion';
+// bicicleta cubre el reparto urbano corto; barco cubre las islas, que en la
+// zona de Chiloe y Palena no tienen otra via. Ver config/vehicles.ts.
+export type VehicleType =
+  | 'bicicleta'
+  | 'moto'
+  | 'auto'
+  | 'furgoneta'
+  | 'camioneta'
+  | 'microbus'
+  | 'camion'
+  | 'barco';
 
 export type ShipmentStatus = 'pending' | 'accepted' | 'in_transit' | 'delivered' | 'cancelled';
 
