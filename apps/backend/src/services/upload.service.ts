@@ -34,6 +34,22 @@ export interface FileStorageProvider {
   save(buffer: Buffer, filename: string, mimeType: string): Promise<string>;
   getUrl(path: string): string;
   delete(path: string): Promise<void>;
+  /**
+   * URL temporal para un archivo privado. Solo la implementan los proveedores
+   * con bucket privado; el almacenamiento local no la tiene porque sirve los
+   * archivos por ruta publica.
+   */
+  getSignedUrl?(path: string, expiresInSeconds: number): Promise<string | null>;
+  /** true si los archivos NO son accesibles sin firma. */
+  readonly isPrivate?: boolean;
+}
+
+function isValidLatitude(v?: number): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= -90 && v <= 90;
+}
+
+function isValidLongitude(v?: number): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= -180 && v <= 180;
 }
 
 // ─── Storage Providers ──────────────────────────────────────────────
@@ -65,6 +81,66 @@ export class LocalStorageProvider implements FileStorageProvider {
       return;
     }
     await fs.unlink(fullPath).catch(() => {});
+  }
+}
+
+/**
+ * Almacenamiento en Supabase Storage con bucket privado.
+ *
+ * Es el unico proveedor apto para produccion. LocalStorageProvider guarda en el
+ * disco del servidor, que en Vercel se borra en cada despliegue -- las fotos se
+ * perderian solas -- y ademas las sirve por URL publica permanente, sin sesion.
+ *
+ * Aca el bucket es privado: lo que se guarda en la base es la ruta, y para
+ * verla hay que pedir una URL firmada que vence. Asi la autorizacion se decide
+ * en cada lectura y no queda un enlace eterno dando vueltas.
+ */
+export class SupabaseStorageProvider implements FileStorageProvider {
+  readonly isPrivate = true;
+  private bucket: string;
+
+  constructor(bucket: string) {
+    this.bucket = bucket;
+  }
+
+  async save(buffer: Buffer, filename: string, mimeType: string): Promise<string> {
+    const { getSupabaseAdmin } = await import('../config/database.js');
+    const supabase = getSupabaseAdmin();
+
+    const { error } = await supabase.storage.from(this.bucket).upload(filename, buffer, {
+      contentType: mimeType,
+      upsert: false,
+    });
+
+    if (error) {
+      throw new Error(`No se pudo guardar el archivo: ${error.message}`);
+    }
+
+    return filename;
+  }
+
+  // El bucket es privado, asi que no hay URL publica. Se devuelve la ruta, que
+  // es lo que se guarda en la base; para mostrarla hay que firmarla.
+  getUrl(filePath: string): string {
+    return filePath;
+  }
+
+  async getSignedUrl(filePath: string, expiresInSeconds: number): Promise<string | null> {
+    const { getSupabaseAdmin } = await import('../config/database.js');
+    const supabase = getSupabaseAdmin();
+
+    const { data, error } = await supabase.storage
+      .from(this.bucket)
+      .createSignedUrl(filePath, expiresInSeconds);
+
+    if (error || !data) return null;
+    return data.signedUrl;
+  }
+
+  async delete(filePath: string): Promise<void> {
+    const { getSupabaseAdmin } = await import('../config/database.js');
+    const supabase = getSupabaseAdmin();
+    await supabase.storage.from(this.bucket).remove([filePath]);
   }
 }
 
@@ -234,7 +310,14 @@ export class UploadService {
   async saveDeliveryEvidence(
     shipmentId: string,
     files: Express.Multer.File[],
-    description?: string
+    options: {
+      description?: string;
+      evidenceType?: 'pickup' | 'delivery' | 'incident';
+      uploadedBy?: string;
+      capturedLat?: number;
+      capturedLng?: number;
+      receiverName?: string;
+    } = {}
   ): Promise<UploadedFile[]> {
     const uploads = await this.processMultipleUploads(files, {
       resize: { width: 1920 },
@@ -243,13 +326,20 @@ export class UploadService {
       thumbnailSize: 300,
     });
 
-    // Store references in database
     const { getSupabaseAdmin } = await import('../config/database.js');
     const supabase = getSupabaseAdmin();
 
+    // Coordenadas validas o nada: un dato de ubicacion inventado en una prueba
+    // de entrega es peor que no tenerlo.
+    const lat = isValidLatitude(options.capturedLat) ? options.capturedLat : null;
+    const lng = isValidLongitude(options.capturedLng) ? options.capturedLng : null;
+
     for (const upload of uploads) {
-      await supabase.from('delivery_evidence').insert({
+      const { error } = await supabase.from('delivery_evidence').insert({
         shipment_id: shipmentId,
+        // Con bucket privado, url es la ruta. Se guarda en storage_path para
+        // firmarla al leer, y file_url queda por compatibilidad.
+        storage_path: upload.url,
         file_url: upload.url,
         thumbnail_url: upload.thumbnailUrl,
         original_name: upload.originalName,
@@ -257,11 +347,32 @@ export class UploadService {
         file_size: upload.size,
         width: upload.width,
         height: upload.height,
-        description,
+        description: options.description,
+        evidence_type: options.evidenceType || 'delivery',
+        uploaded_by: options.uploadedBy,
+        captured_lat: lat,
+        captured_lng: lng,
+        captured_at: new Date().toISOString(),
+        receiver_name: options.receiverName,
       });
+
+      // Si la fila no se guarda, el archivo esta subido pero la evidencia no
+      // existe para el sistema. Hay que fallar, no seguir en silencio.
+      if (error) {
+        throw new Error(`No se pudo registrar la evidencia: ${error.message}`);
+      }
     }
 
     return uploads;
+  }
+
+  /**
+   * URL temporal para ver una evidencia guardada en bucket privado.
+   * Devuelve null si el proveedor no firma (disco local en desarrollo).
+   */
+  async getEvidenceViewUrl(storagePath: string, expiresInSeconds = 300): Promise<string | null> {
+    if (!this.storage.getSignedUrl) return null;
+    return this.storage.getSignedUrl(storagePath, expiresInSeconds);
   }
 
   /**
@@ -306,7 +417,22 @@ export class UploadService {
 export function createUploadService(baseUrl?: string): UploadService {
   const uploadDir = process.env.UPLOAD_DIR || './uploads';
   const serverUrl = baseUrl || process.env.SERVER_URL || 'http://localhost:3000';
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET;
 
-  const storage = new LocalStorageProvider(uploadDir, serverUrl);
-  return new UploadService(storage, uploadDir, serverUrl);
+  if (bucket) {
+    console.log(`[Upload] Usando Supabase Storage (bucket privado: ${bucket})`);
+    return new UploadService(new SupabaseStorageProvider(bucket), uploadDir, serverUrl);
+  }
+
+  // El disco local sirve para desarrollo. En produccion no: Vercel lo borra en
+  // cada despliegue y las evidencias quedarian con URL publica permanente.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[Upload] Falta SUPABASE_STORAGE_BUCKET. En produccion no se puede usar el disco local: ' +
+      'se borra en cada despliegue y expone las evidencias por URL publica.'
+    );
+  }
+
+  console.log('[Upload] Usando disco local (solo desarrollo)');
+  return new UploadService(new LocalStorageProvider(uploadDir, serverUrl), uploadDir, serverUrl);
 }

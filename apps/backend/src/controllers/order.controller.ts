@@ -4,11 +4,13 @@ import { getSupabaseAdmin, withRetry } from '../config/database.js';
 import { calculatePrice, resolveDistanceKm } from '../services/pricing.service.js';
 import { VehicleType, PaymentMethod } from '../types/index.js';
 import { getEffectiveCapacity, VEHICLE_TYPE_VALUES } from '../config/vehicles.js';
+import { createUploadService } from '../services/upload.service.js';
 import { PaymentService, PaymentProviderType } from '../services/payment.service.js';
 import { eventBus } from '../services/event-bus.js';
 import { logger } from '../services/logger.js';
 
 const paymentService = new PaymentService();
+const uploadService = createUploadService();
 
 const PAYMENT_METHOD_MAP: Record<PaymentMethod, PaymentProviderType> = {
   card: 'stripe',
@@ -492,6 +494,43 @@ export async function deliverShipment(req: Request, res: Response): Promise<void
 
     if (shipment.status !== 'in_transit' || shipment.provider_id !== providerId) {
       res.status(400).json({ error: 'Shipment cannot be delivered' });
+      return;
+    }
+
+    // La foto del paquete entregado es obligatoria y se guarda ANTES de cerrar
+    // el envio: si guardarla falla, el envio no queda entregado. Al reves
+    // quedaria cerrado sin prueba, que es justo lo que hay que evitar.
+    const photo = (req.file as Express.Multer.File | undefined)
+      || (Array.isArray(req.files) ? req.files[0] : undefined);
+
+    if (!photo) {
+      res.status(400).json({
+        error: 'Se requiere una foto del paquete entregado para cerrar el envío',
+        reason: 'delivery_photo_required',
+      });
+      return;
+    }
+
+    const { captured_lat, captured_lng, receiver_name } = req.body as {
+      captured_lat?: string;
+      captured_lng?: string;
+      receiver_name?: string;
+    };
+
+    try {
+      await uploadService.saveDeliveryEvidence(id, [photo], {
+        evidenceType: 'delivery',
+        uploadedBy: providerId,
+        capturedLat: captured_lat ? Number(captured_lat) : undefined,
+        capturedLng: captured_lng ? Number(captured_lng) : undefined,
+        receiverName: receiver_name,
+      });
+    } catch (evidenceErr) {
+      logger.error({ err: evidenceErr, shipmentId: id }, 'No se pudo guardar la evidencia de entrega');
+      res.status(500).json({
+        error: 'No se pudo guardar la foto de entrega. El envío sigue en ruta, intenta de nuevo.',
+        reason: 'evidence_save_failed',
+      });
       return;
     }
 

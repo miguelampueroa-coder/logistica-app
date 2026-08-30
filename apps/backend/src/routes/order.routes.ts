@@ -12,6 +12,9 @@ import {
   cancelShipment,
   createShipmentSchema,
 } from '../controllers/order.controller.js';
+import { createUploadService } from '../services/upload.service.js';
+
+const deliveryPhotoUpload = createUploadService().getMulterMiddleware();
 
 const router = Router();
 
@@ -49,10 +52,13 @@ router.post(
   pickupShipment
 );
 
+// La entrega llega como multipart: la foto del paquete entregado es parte de
+// la operacion, no una subida aparte que despues nadie hace.
 router.post(
   '/:id/deliver',
   authenticate,
   authorize('provider'),
+  deliveryPhotoUpload.single('photo'),
   deliverShipment
 );
 

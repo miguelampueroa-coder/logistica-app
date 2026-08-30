@@ -2,11 +2,31 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express, { Request, Response, NextFunction } from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+
+const deliveryUpload = multer({ storage: multer.memoryStorage() });
 
 vi.mock('../../config/database.js', () => ({
   getSupabaseAdmin: vi.fn(),
   withRetry: vi.fn(async (operation) => operation()),
 }));
+
+// Multer real para que .attach() funcione y la ausencia de foto se comporte
+// como en produccion; solo se simula el guardado del archivo.
+// vi.hoisted porque vi.mock se eleva por encima de las declaraciones normales.
+const { saveDeliveryEvidence } = vi.hoisted(() => ({
+  saveDeliveryEvidence: vi.fn().mockResolvedValue([{ url: 'evidencias/ship-1/foto.jpg' }]),
+}));
+
+vi.mock('../../services/upload.service.js', async () => {
+  const multer = (await import('multer')).default;
+  return {
+    createUploadService: () => ({
+      getMulterMiddleware: () => multer({ storage: multer.memoryStorage() }),
+      saveDeliveryEvidence,
+    }),
+  };
+});
 
 vi.mock('../../services/pricing.service.js', () => ({
   calculatePrice: vi.fn().mockReturnValue({
@@ -184,7 +204,13 @@ function buildApp(): express.Express {
   orderRouter.get('/available', authenticateTest, authorizeTest('provider'), getAvailableShipments);
   orderRouter.post('/:id/accept', authenticateTest, authorizeTest('provider'), acceptShipment);
   orderRouter.post('/:id/pickup', authenticateTest, authorizeTest('provider'), pickupShipment);
-  orderRouter.post('/:id/deliver', authenticateTest, authorizeTest('provider'), deliverShipment);
+  orderRouter.post(
+    '/:id/deliver',
+    authenticateTest,
+    authorizeTest('provider'),
+    deliveryUpload.single('photo'),
+    deliverShipment
+  );
   orderRouter.post('/:id/cancel', authenticateTest, cancelShipment);
 
   app.use('/api/orders', orderRouter);
@@ -384,10 +410,73 @@ describe('Order Lifecycle Integration', () => {
     const res = await request(app)
       .post('/api/orders/ship-1/deliver')
       .set('Authorization', providerToken)
-      .send({});
+      .field('captured_lat', '-41.4693')
+      .field('captured_lng', '-72.9424')
+      .attach('photo', Buffer.from('foto-de-prueba'), 'entrega.jpg');
 
     expect(res.status).toBe(200);
     expect(res.body.message).toContain('delivered');
+  });
+
+  it('no cierra el envio si no se adjunta la foto de entrega', async () => {
+    const shipmentChain = createMockChain({
+      single: vi.fn().mockResolvedValue({
+        data: {
+          id: 'ship-1',
+          status: 'in_transit',
+          provider_id: 'user-provider-1',
+          user_id: 'user-client-1',
+          total_price: 650,
+        },
+        error: null,
+      }),
+    });
+
+    mockFrom((table: string) => {
+      if (table === 'shipments') return shipmentChain;
+      return createMockChain();
+    });
+
+    const res = await request(app)
+      .post('/api/orders/ship-1/deliver')
+      .set('Authorization', providerToken)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.reason).toBe('delivery_photo_required');
+  });
+
+  // Si la evidencia no se pudo guardar, el envio tiene que seguir en ruta:
+  // cerrarlo igual dejaria una entrega sin prueba, que es lo que se corrige.
+  it('deja el envio en ruta si la evidencia no se puede guardar', async () => {
+    saveDeliveryEvidence.mockRejectedValueOnce(new Error('bucket caido'));
+
+    const shipmentChain = createMockChain({
+      single: vi.fn().mockResolvedValue({
+        data: {
+          id: 'ship-1',
+          status: 'in_transit',
+          provider_id: 'user-provider-1',
+          user_id: 'user-client-1',
+          total_price: 650,
+        },
+        error: null,
+      }),
+    });
+
+    mockFrom((table: string) => {
+      if (table === 'shipments') return shipmentChain;
+      return createMockChain();
+    });
+
+    const res = await request(app)
+      .post('/api/orders/ship-1/deliver')
+      .set('Authorization', providerToken)
+      .attach('photo', Buffer.from('foto'), 'entrega.jpg');
+
+    expect(res.status).toBe(500);
+    expect(res.body.reason).toBe('evidence_save_failed');
+    expect(shipmentChain.update).not.toHaveBeenCalled();
   });
 
   it('should cancel a pending shipment', async () => {
