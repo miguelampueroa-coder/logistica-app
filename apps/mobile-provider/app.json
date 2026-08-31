@@ -26,7 +26,13 @@
       "package": "com.enviazo.provider"
     },
     "plugins": [
-      "expo-location"
+      "expo-location",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Enviazo usa la cámara para tomar la foto del paquete entregado, que es la prueba de la entrega."
+        }
+      ]
     ]
   }
 }

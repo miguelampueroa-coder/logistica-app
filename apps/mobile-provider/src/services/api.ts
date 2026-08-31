@@ -38,8 +38,13 @@ async function refreshToken(token: string): Promise<string | null> {
 async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, ...fetchOptions } = options;
 
+  // Con FormData no se fija Content-Type: fetch tiene que poner el suyo con el
+  // boundary del multipart. Si se lo forzamos a application/json, el servidor
+  // no puede separar las partes y el archivo se pierde.
+  const isMultipart = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isMultipart ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
 
@@ -135,11 +140,45 @@ export const api = {
         token,
       }),
 
-    deliver: (id: string, token: string) =>
-      fetchAPI<{ message: string }>(`/api/orders/${id}/deliver`, {
+    /**
+     * Cierra el envío. La foto del paquete entregado es obligatoria: el
+     * backend rechaza la entrega sin ella.
+     */
+    deliver: (
+      id: string,
+      token: string,
+      evidence: {
+        photoUri: string;
+        capturedLat?: number;
+        capturedLng?: number;
+        receiverName?: string;
+      }
+    ) => {
+      const form = new FormData();
+
+      form.append('photo', {
+        uri: evidence.photoUri,
+        name: 'entrega.jpg',
+        type: 'image/jpeg',
+      } as unknown as Blob);
+
+      if (evidence.capturedLat !== undefined) {
+        form.append('captured_lat', String(evidence.capturedLat));
+      }
+      if (evidence.capturedLng !== undefined) {
+        form.append('captured_lng', String(evidence.capturedLng));
+      }
+      if (evidence.receiverName) {
+        form.append('receiver_name', evidence.receiverName);
+      }
+
+      // Sin Content-Type a mano: fetch le pone el boundary del multipart.
+      return fetchAPI<{ message: string }>(`/api/orders/${id}/deliver`, {
         method: 'POST',
         token,
-      }),
+        body: form,
+      });
+    },
 
     getMy: (token: string) =>
       fetchAPI<{ shipments: any[] }>('/api/orders', { token }),

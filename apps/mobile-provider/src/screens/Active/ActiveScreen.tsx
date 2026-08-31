@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../services/api';
 
@@ -130,29 +131,59 @@ export default function ActiveScreen() {
     );
   };
 
+  // La entrega se cierra con una foto del paquete entregado a la persona. Es
+  // la única prueba de que el envío llegó, así que la cámara abre primero y el
+  // envío solo se cierra si hay foto.
   const handleDeliver = async () => {
-    Alert.alert(
-      'Confirmar Entrega',
-      '¿Confirmas que el paquete ha sido entregado?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            setIsUpdating(true);
-            try {
-              await api.orders.deliver(activeShipment.id, token!);
-              Alert.alert('Éxito', '¡Envío completado! Ganancia registrada.');
-              setActiveShipment(null);
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Error al entregar paquete');
-            } finally {
-              setIsUpdating(false);
-            }
-          },
-        },
-      ]
-    );
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        'Se necesita la cámara',
+        'Para cerrar la entrega hay que tomar una foto del paquete entregado. ' +
+        'Activa el permiso de cámara en los ajustes del teléfono.'
+      );
+      return;
+    }
+
+    const photo = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      exif: false,
+    });
+
+    if (photo.canceled || !photo.assets?.length) return;
+
+    setIsUpdating(true);
+    try {
+      // La ubicación acompaña a la foto: una prueba de entrega sin lugar vale
+      // poco ante un reclamo. Si el GPS falla, se envía igual la foto.
+      let coords: { lat: number; lng: number } | undefined;
+      try {
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      } catch {
+        coords = undefined;
+      }
+
+      await api.orders.deliver(activeShipment.id, token!, {
+        photoUri: photo.assets[0].uri,
+        capturedLat: coords?.lat,
+        capturedLng: coords?.lng,
+      });
+
+      Alert.alert('Éxito', '¡Envío completado! Ganancia registrada.');
+      setActiveShipment(null);
+    } catch (error: any) {
+      Alert.alert(
+        'No se pudo cerrar la entrega',
+        error.message || 'El envío sigue en ruta. Revisa tu conexión e intenta de nuevo.'
+      );
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   if (isLoading) {
