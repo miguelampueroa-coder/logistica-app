@@ -16,6 +16,7 @@ import trackingRoutes from './routes/tracking.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import verificationRoutes from './routes/verification.routes.js';
 import pushRoutes from './routes/push.routes.js';
 import { WhatsAppModule } from './modules/whatsapp/index.js';
 import { createWebhookRoutes } from './modules/whatsapp/api/webhook.routes.js';
@@ -104,6 +105,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/verification', verificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/push', pushRoutes);
 

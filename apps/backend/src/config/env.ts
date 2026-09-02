@@ -34,6 +34,15 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   LOCATION_HISTORY_RETENTION_DAYS: z.coerce.number().default(90),
 
+  // Bucket privado de Supabase Storage para evidencias y documentos. En
+  // produccion es obligatorio: sin el, los archivos irian al disco del
+  // servidor, que Vercel borra en cada despliegue.
+  SUPABASE_STORAGE_BUCKET: z.string().optional(),
+
+  // Bloquea a los prestadores sin documento aprobado. Viene apagado: si se
+  // enciende antes de tener prestadores verificados, nadie puede trabajar.
+  REQUIRE_PROVIDER_VERIFICATION: z.enum(['true', 'false']).default('false'),
+
   // Email
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional(),

@@ -5,6 +5,7 @@ import { calculatePrice, resolveDistanceKm } from '../services/pricing.service.j
 import { VehicleType, PaymentMethod } from '../types/index.js';
 import { getEffectiveCapacity, VEHICLE_TYPE_VALUES } from '../config/vehicles.js';
 import { createUploadService } from '../services/upload.service.js';
+import { canProviderAcceptShipments } from '../services/verification.service.js';
 import { PaymentService, PaymentProviderType } from '../services/payment.service.js';
 import { eventBus } from '../services/event-bus.js';
 import { logger } from '../services/logger.js';
@@ -252,6 +253,14 @@ export async function acceptShipment(req: Request, res: Response): Promise<void>
     const { id } = req.params;
     const { vehicle_id } = req.body;
     const supabase = getSupabaseAdmin();
+
+    // Solo bloquea si REQUIRE_PROVIDER_VERIFICATION esta encendido; viene
+    // apagado para no dejar al marketplace sin oferta el primer dia.
+    const verification = await canProviderAcceptShipments(providerId);
+    if (!verification.allowed) {
+      res.status(403).json({ error: verification.reason, reason: 'provider_not_verified' });
+      return;
+    }
 
     if (!vehicle_id) {
       res.status(400).json({ error: 'vehicle_id is required' });
