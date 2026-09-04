@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createAuthClient, getSupabaseAdmin } from '../config/database.js';
 import { generateToken } from '../middleware/auth.js';
 import { env } from '../config/env.js';
+import { logger } from '../services/logger.js';
 import { User, UserRole } from '../types/index.js';
 
 export const registerSchema = z.object({
@@ -17,6 +18,15 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: z.string().min(1, 'Password is required'),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Correo inválido'),
+});
+
+export const resetPasswordSchema = z.object({
+  access_token: z.string().min(1, 'Falta el token del enlace de recuperación'),
+  new_password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres'),
 });
 
 export async function register(req: Request, res: Response): Promise<void> {
@@ -168,5 +178,85 @@ export async function refresh(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error('Token refresh error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * Envia el correo con el enlace para restablecer la contraseña.
+ *
+ * Responde siempre lo mismo, exista o no la cuenta. Si respondiera distinto,
+ * cualquiera podria averiguar que correos estan registrados en Enviazo
+ * probandolos uno por uno.
+ */
+export async function forgotPassword(req: Request, res: Response): Promise<void> {
+  const respuestaNeutra = {
+    message: 'Si el correo está registrado, te enviamos un enlace para restablecer tu contraseña',
+  };
+
+  try {
+    const { email } = req.body as { email: string };
+
+    const redirectTo = env.PASSWORD_RESET_REDIRECT_URL;
+    const { error } = await createAuthClient().auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+
+    if (error) {
+      // Se registra pero no se le cuenta a quien pregunta: puede ser un correo
+      // inexistente o un problema del proveedor de correo, y distinguirlos
+      // hacia afuera filtra quien tiene cuenta.
+      logger.warn({ err: error }, 'Fallo al enviar el correo de recuperacion');
+    }
+
+    res.json(respuestaNeutra);
+  } catch (error) {
+    logger.error({ err: error }, 'Error en forgotPassword');
+    res.json(respuestaNeutra);
+  }
+}
+
+/**
+ * Fija la contraseña nueva usando el token del enlace del correo.
+ *
+ * El token lo emite Supabase y vence solo; aca se valida pidiendole a Supabase
+ * el usuario que representa. Un token vencido o inventado no devuelve usuario.
+ */
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  try {
+    const { access_token, new_password } = req.body as {
+      access_token: string;
+      new_password: string;
+    };
+
+    const authClient = createAuthClient();
+    const { data: userData, error: userError } = await authClient.auth.getUser(access_token);
+
+    if (userError || !userData?.user) {
+      res.status(400).json({
+        error: 'El enlace de recuperación no es válido o ya venció. Pide uno nuevo.',
+        reason: 'invalid_reset_token',
+      });
+      return;
+    }
+
+    // El cambio se hace con service role: el token del enlace sirve para
+    // identificar al usuario, no para dejarlo operar sobre su cuenta.
+    const supabase = getSupabaseAdmin();
+    const { error: updateError } = await supabase.auth.admin.updateUserById(userData.user.id, {
+      password: new_password,
+    });
+
+    if (updateError) {
+      logger.error({ err: updateError, userId: userData.user.id }, 'Fallo al cambiar la contrasena');
+      res.status(400).json({ error: 'No se pudo cambiar la contraseña. Intenta de nuevo.' });
+      return;
+    }
+
+    logger.info({ userId: userData.user.id }, 'Contrasena restablecida');
+
+    res.json({ message: 'Contraseña actualizada. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en resetPassword');
+    res.status(500).json({ error: 'Error interno' });
   }
 }

@@ -43,6 +43,11 @@ const envSchema = z.object({
   // enciende antes de tener prestadores verificados, nadie puede trabajar.
   REQUIRE_PROVIDER_VERIFICATION: z.enum(['true', 'false']).default('false'),
 
+  // A donde manda el enlace del correo de recuperacion de contrasena. Tiene que
+  // estar en la lista de redirects permitidos del proyecto Supabase, si no
+  // Supabase ignora el enlace y manda al sitio por defecto.
+  PASSWORD_RESET_REDIRECT_URL: z.string().url().optional(),
+
   // Email
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional(),
