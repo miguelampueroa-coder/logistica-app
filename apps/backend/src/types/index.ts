@@ -14,7 +14,10 @@ export type VehicleType =
 
 export type ShipmentStatus = 'pending' | 'accepted' | 'in_transit' | 'delivered' | 'cancelled';
 
-export type PaymentMethod = 'cash' | 'card' | 'transfer';
+// Enviazo no acepta efectivo (decision de Miguel, 2026-09): si el cliente le
+// paga en mano al prestador, la plata nunca pasa por la plataforma y no hay de
+// donde descontar la comision. Solo pagos virtuales.
+export type PaymentMethod = 'card' | 'qr' | 'transfer';
 
 export type PaymentStatusType = 'pending' | 'processing' | 'completed' | 'failed' | 'refunded' | 'cancelled';
 

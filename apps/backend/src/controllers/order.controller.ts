@@ -13,10 +13,13 @@ import { logger } from '../services/logger.js';
 const paymentService = new PaymentService();
 const uploadService = createUploadService();
 
+// QR y transferencia van por Webpay, que soporta las dos en Chile.
+// {{CONFIRMAR MIGUEL: si el QR es de otro proveedor (MACH, Mercado Pago), este
+// mapeo cambia}}
 const PAYMENT_METHOD_MAP: Record<PaymentMethod, PaymentProviderType> = {
   card: 'stripe',
+  qr: 'webpay',
   transfer: 'webpay',
-  cash: 'cash',
 };
 
 const SEARCH_RADIUS_KM = 10;
@@ -46,7 +49,7 @@ export const createShipmentSchema = z.object({
   urgency: z.boolean().default(false),
   scheduled_at: z.string().datetime().optional(),
   preferred_vehicle_type: z.enum(VEHICLE_TYPE_VALUES).optional(),
-  payment_method: z.enum(['card', 'transfer', 'cash']).default('card'),
+  payment_method: z.enum(['card', 'qr', 'transfer']).default('card'),
 });
 
 export async function createShipment(req: Request, res: Response): Promise<void> {

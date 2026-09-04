@@ -24,7 +24,8 @@ router.post('/create', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    const validMethods: PaymentProviderType[] = ['stripe', 'webpay', 'cash'];
+    // Sin 'cash': Enviazo solo acepta pagos virtuales.
+    const validMethods: PaymentProviderType[] = ['stripe', 'webpay'];
     if (!validMethods.includes(method)) {
       res.status(400).json({ error: `Invalid method. Use: ${validMethods.join(', ')}` });
       return;
@@ -106,31 +107,14 @@ router.post('/confirm', authenticate, async (req: Request, res: Response) => {
     const safePayload: Record<string, unknown> = { ...(payload || {}) };
     delete safePayload.operatorConfirmed;
 
+    // El efectivo ya no se acepta, asi que no hay confirmacion manual que
+    // hacer: los pagos virtuales los confirma la pasarela.
     if (method === 'cash') {
-      const supabase = getSupabaseAdmin();
-      const { data: cashPayment } = await supabase
-        .from('payments')
-        .select('amount, shipment_id, shipments(provider_id)')
-        .eq('stripe_payment_id', paymentId)
-        .single();
-
-      if (!cashPayment) {
-        res.status(404).json({ error: 'Payment not found' });
-        return;
-      }
-
-      const shipmentRel = cashPayment.shipments as unknown as { provider_id: string | null } | null;
-      const isAssignedProvider = shipmentRel?.provider_id === req.user.userId;
-      if (req.user.role !== 'admin' && !isAssignedProvider) {
-        res.status(403).json({
-          error: 'Only the assigned provider or an admin can confirm a cash payment',
-        });
-        return;
-      }
-
-      safePayload.operatorConfirmed = true;
-      safePayload.operatorId = req.user.userId;
-      safePayload.amount = cashPayment.amount;
+      res.status(400).json({
+        error: 'Enviazo ya no acepta pagos en efectivo',
+        reason: 'cash_not_supported',
+      });
+      return;
     }
 
     const result = await paymentService.confirmPayment(paymentId, method, safePayload);

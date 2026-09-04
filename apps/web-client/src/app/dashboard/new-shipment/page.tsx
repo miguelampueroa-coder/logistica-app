@@ -6,19 +6,20 @@ import { useAuth } from '@/hooks/useAuth';
 import { api } from '@/lib/api';
 import { MapPin, Package, AlertCircle, CheckCircle, CreditCard } from 'lucide-react';
 
-// El backend mapea payment_method -> proveedor (card->stripe, transfer->webpay,
-// cash->cash) pero solo registra un proveedor si sus credenciales existen. Sin
-// eso, crear un pago con ese método falla en silencio y el envío queda sin
-// pago vinculado. Por eso el método se restringe a /api/payments/providers.
+// El backend mapea payment_method -> proveedor (card->stripe,
+// transfer/qr->webpay) pero solo registra un proveedor si sus credenciales
+// existen. Sin eso, crear un pago con ese método falla en silencio y el envío
+// queda sin pago vinculado. Por eso el método se restringe a lo que devuelve
+// /api/payments/providers.
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
-  card: 'Tarjeta (Stripe)',
-  transfer: 'Transferencia (Webpay)',
-  cash: 'Efectivo',
+  card: 'Tarjeta',
+  transfer: 'Transferencia',
+  qr: 'Código QR',
 };
+// Sin efectivo: Enviazo solo acepta pagos virtuales.
 const PROVIDER_TO_METHOD: Record<string, string> = {
   stripe: 'card',
   webpay: 'transfer',
-  cash: 'cash',
 };
 
 export default function NewShipmentPage() {
@@ -55,7 +56,7 @@ export default function NewShipmentPage() {
 
     // Options
     urgency: false,
-    payment_method: 'cash',
+    payment_method: 'card',
   });
 
   useEffect(() => {
@@ -65,7 +66,10 @@ export default function NewShipmentPage() {
       if (methods.length > 0) {
         setFormData((prev) => ({ ...prev, payment_method: methods[0] }));
       }
-    }).catch(() => setPaymentMethods(['cash']));
+      // Si no se pudo consultar los métodos, no se asume ninguno: antes caía a
+      // efectivo, así que un fallo de red hacía que todos los envíos se crearan
+      // en efectivo, que es justo lo que no se acepta.
+    }).catch(() => setPaymentMethods([]));
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -386,9 +390,9 @@ export default function NewShipmentPage() {
               ))}
             </select>
           )}
-          {paymentMethods.length === 1 && paymentMethods[0] === 'cash' && (
-            <p className="text-xs text-gray-500 mt-2">
-              Tarjeta y transferencia estarán disponibles próximamente.
+          {paymentMethods.length === 0 && (
+            <p className="text-xs text-red-600 mt-2">
+              No hay métodos de pago disponibles en este momento. Intenta de nuevo en unos minutos.
             </p>
           )}
         </div>

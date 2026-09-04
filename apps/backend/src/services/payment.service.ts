@@ -4,6 +4,9 @@
 import Stripe from 'stripe';
 import { getSupabaseAdmin } from '../config/database.js';
 
+// 'cash' se mantiene en el tipo para poder leer y reembolsar los pagos en
+// efectivo que hayan quedado registrados antes de eliminarlo, pero ya no se
+// puede crear uno nuevo: no se registra el proveedor.
 export type PaymentProviderType = 'stripe' | 'webpay' | 'cash';
 export type PaymentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'refunded' | 'cancelled';
 
@@ -412,8 +415,11 @@ export class PaymentService {
       console.log('[Payment] Webpay provider registered');
     }
 
-    // Cash always available
-    this.providers.set('cash', new CashPaymentProvider());
+    // El efectivo NO se registra: Enviazo solo acepta pagos virtuales. Si la
+    // plata pasa de mano en mano, la plataforma no la ve y no puede descontar
+    // su comision ni garantizarle el cobro al prestador.
+    // La clase CashPaymentProvider se conserva a proposito para poder leer
+    // pagos historicos; al no estar registrada, createPayment('cash') falla.
   }
 
   getAvailableProviders(): PaymentProviderType[] {
